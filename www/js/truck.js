@@ -6,10 +6,10 @@
 
   var S = 1 / 3;                   // art units -> world units
   var OX = 840, OY = 823;          // art-space anchor: truck centre at ground level
-  var WHEELS = [248, 523, 1260];   // wheel centres (art x)
-  var WHEEL_Y = 707, WHEEL_R = 116;
-  var BED_TOP = 410;               // cargo rests on this art y
-  var SLOTS = [842, 532, 223];     // cargo slot centres (art x), loaded front first
+  var WHEELS = [354, 634, 1348];   // wheel centres (art x)
+  var WHEEL_Y = 717, WHEEL_R = 106;
+  var BED_TOP = 548;               // cargo rests on the bed floor at this art y
+  var SLOTS = [1010, 620, 230];    // cargo slot centres (art x), loaded front first
 
   var DEFAULTS = {
     maxSpeed: 360,      // world units / s
@@ -143,208 +143,191 @@
   Truck.prototype.slotWorld = function (i) { return this.artToWorld(SLOTS[i], BED_TOP); };
 
   // ------------------------------------------------------------------ drawing
+  var OR = '#f8a619', OR_LT = '#ffc23d', OR_DK = '#d9820b', OR_LINE = '#c47208';
+  var SLATE = '#3b4250', SLATE_LT = '#545c6c';
+  var POSTS = [36, 262, 498, 734, 970];
+
   function wheel(ctx, cx, cy, ang) {
-    D.circle(ctx, cx, cy, WHEEL_R, '#1f1f24', INK, 6);
-    // tread blocks
+    D.circle(ctx, cx, cy, WHEEL_R, '#2b2f38', INK, 6);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-    ctx.fillStyle = '#2f2f37';
-    for (var i = 0; i < 22; i++) {
-      ctx.rotate(Math.PI * 2 / 22);
-      ctx.fillRect(-7, -WHEEL_R + 4, 14, 12);
-    }
+    ctx.fillStyle = '#3a404b';
+    for (var i = 0; i < 20; i++) { ctx.rotate(Math.PI / 10); ctx.fillRect(-7, -WHEEL_R + 4, 14, 11); }
     ctx.restore();
-    D.circle(ctx, cx, cy, 96, '#2a2a31');
-    ctx.beginPath(); ctx.arc(cx, cy, 104, Math.PI * 1.1, Math.PI * 1.5); ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 6; ctx.stroke();
-    var g = ctx.createRadialGradient(cx - 18, cy - 22, 8, cx, cy, 74);
-    g.addColorStop(0, '#ffffff'); g.addColorStop(0.55, '#d9dce2'); g.addColorStop(1, '#9ea3ad');
-    D.circle(ctx, cx, cy, 72, g, '#4b4e57', 5);
-    D.circle(ctx, cx, cy, 54, null, '#8d929c', 4);
+    D.circle(ctx, cx, cy, 86, '#353b46');
+    ctx.beginPath(); ctx.arc(cx, cy, 95, Math.PI * 1.1, Math.PI * 1.5); ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 6; ctx.stroke();
+    var g = ctx.createRadialGradient(cx - 16, cy - 20, 6, cx, cy, 64);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.6, '#d3d6dc'); g.addColorStop(1, '#a3a8b2');
+    D.circle(ctx, cx, cy, 62, g, '#5a5f69', 5);
+    D.circle(ctx, cx, cy, 46, null, '#9095a0', 3);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-    for (var j = 0; j < 10; j++) {
-      var a = j * Math.PI / 5;
-      D.circle(ctx, Math.cos(a) * 62, Math.sin(a) * 62, 7, '#2b2b30');
-    }
-    for (var n = 0; n < 6; n++) {
-      var b = n * Math.PI / 3;
-      D.circle(ctx, Math.cos(b) * 38, Math.sin(b) * 38, 5, '#5a5e67');
-    }
+    D.circle(ctx, 0, 0, 30, '#555c69', INK, 3);
+    for (var j = 0; j < 6; j++) { var a = j * Math.PI / 3; D.circle(ctx, Math.cos(a) * 20, Math.sin(a) * 20, 4.5, '#2b2f38'); }
+    for (var n = 0; n < 8; n++) { var b = n * Math.PI / 4 + 0.39; D.circle(ctx, Math.cos(b) * 52, Math.sin(b) * 52, 4, '#7d828d'); }
     ctx.restore();
-    D.circle(ctx, cx, cy, 27, '#1f1f24', '#3a3a42', 3);
-    D.circle(ctx, cx - 6, cy - 7, 8, '#55565e');
+    D.circle(ctx, cx, cy, 11, '#2b2f38');
+    D.circle(ctx, cx - 4, cy - 4, 4, '#6a707c');
   }
 
   function bodyBack(ctx, t) {
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    // chassis rail + under-cab frame
-    D.box(ctx, 88, 572, 1050, 44, 8, '#1b1b20');
-    D.box(ctx, 1108, 560, 70, 140, 10, '#1d1d22');
-    // rear wheel liner (dark well behind the tyres)
-    ctx.fillStyle = '#121216';
-    ctx.beginPath(); ctx.arc(248, 707, 132, Math.PI, 0); ctx.fill();
-    ctx.beginPath(); ctx.arc(523, 707, 132, Math.PI, 0); ctx.fill();
-    // front wheel arch liner
-    ctx.beginPath(); ctx.arc(1260, 707, 146, Math.PI, 0); ctx.fill();
-    // side box / fuel tank + step
-    D.box(ctx, 705, 603, 346, 90, 12, '#26262c', INK, 5);
-    ctx.fillStyle = '#3a3a43'; ctx.fillRect(712, 610, 332, 12);
-    D.box(ctx, 878, 603, 16, 90, 3, '#3d3d46');
-    D.box(ctx, 688, 692, 390, 22, 9, '#4b4b54', INK, 5);
+    // wheel wells
+    ctx.fillStyle = '#16181d';
+    WHEELS.forEach(function (wx, i) { ctx.beginPath(); ctx.arc(wx, WHEEL_Y, i === 2 ? 140 : 122, Math.PI, 0); ctx.fill(); });
+    // chassis rail
+    D.box(ctx, 64, 556, 1180, 56, 8, SLATE, INK, 5);
+    ctx.fillStyle = SLATE_LT; ctx.fillRect(70, 562, 1168, 8);
     // rear bumper + tail light
-    D.box(ctx, 38, 598, 66, 96, 9, '#232328', INK, 5);
+    D.box(ctx, 28, 560, 56, 132, 9, SLATE, INK, 5);
     var tl = t.brakeLight;
-    D.box(ctx, 44, 606, 24, 48, 6, tl > 0.05 ? 'rgb(255,' + Math.round(70 - tl * 40) + ',' + Math.round(55 - tl * 30) + ')' : '#d8352d', INK, 3);
-    D.box(ctx, 48, 610, 8, 18, 3, 'rgba(255,190,180,.8)');
+    D.box(ctx, 34, 636, 30, 46, 6, tl > 0.05 ? 'rgb(255,' + Math.round(70 - tl * 40) + ',' + Math.round(55 - tl * 30) + ')' : '#d8352d', INK, 3);
+    D.box(ctx, 38, 640, 9, 16, 3, 'rgba(255,190,180,.8)');
     if (tl > 0.05) {
-      var gl = ctx.createRadialGradient(56, 630, 4, 56, 630, 90);
+      var gl = ctx.createRadialGradient(50, 660, 4, 50, 660, 90);
       gl.addColorStop(0, 'rgba(255,60,40,' + (0.55 * tl) + ')'); gl.addColorStop(1, 'rgba(255,60,40,0)');
-      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(56, 630, 90, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(50, 660, 90, 0, Math.PI * 2); ctx.fill();
     }
+    // fuel tank + battery box
+    D.box(ctx, 800, 606, 44, 74, 6, SLATE, INK, 4);
+    D.box(ctx, 848, 604, 182, 96, 30, SLATE, INK, 5);
+    ctx.fillStyle = SLATE_LT; D.rr(ctx, 862, 614, 154, 14, 7); ctx.fill();
+    ctx.fillStyle = '#2b303b'; ctx.fillRect(892, 606, 12, 92); ctx.fillRect(976, 606, 12, 92);
+    // frame piece behind the front wheel
+    D.box(ctx, 1196, 600, 46, 130, 8, SLATE, INK, 4);
   }
 
   function fenders(ctx) {
-    // tandem fenders: a thick arc over each rear tyre, outlined
-    [248, 523].forEach(function (cx) {
-      ctx.lineCap = 'butt';
-      ctx.strokeStyle = INK; ctx.lineWidth = 34;
-      ctx.beginPath(); ctx.arc(cx, 707, 137, Math.PI * 1.04, Math.PI * 1.96); ctx.stroke();
-      ctx.strokeStyle = '#2c2c34'; ctx.lineWidth = 22;
-      ctx.beginPath(); ctx.arc(cx, 707, 137, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(cx, 707, 143, Math.PI * 1.2, Math.PI * 1.6); ctx.stroke();
-    });
-    ctx.lineCap = 'round';
+    // tandem fender over the two rear axles
+    ctx.fillStyle = SLATE; ctx.strokeStyle = INK; ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(214, 700);
+    ctx.arc(WHEELS[0], WHEEL_Y, 140, Math.PI * 1.03, Math.PI * 1.5);
+    ctx.lineTo(WHEELS[1], WHEEL_Y - 140);
+    ctx.arc(WHEELS[1], WHEEL_Y, 140, Math.PI * 1.5, Math.PI * 1.97);
+    ctx.lineTo(774, 700);
+    ctx.lineTo(752, 700);
+    ctx.arc(WHEELS[1], WHEEL_Y, 118, Math.PI * 1.97, Math.PI * 1.5, true);
+    ctx.lineTo(WHEELS[0], WHEEL_Y - 118);
+    ctx.arc(WHEELS[0], WHEEL_Y, 118, Math.PI * 1.5, Math.PI * 1.03, true);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(WHEELS[0], WHEEL_Y, 131, Math.PI * 1.15, Math.PI * 1.5); ctx.lineTo(WHEELS[1], WHEEL_Y - 131); ctx.stroke();
     // marker lights
-    D.box(ctx, 98, 583, 26, 13, 5, '#ff9a1f', INK, 3);
-    D.box(ctx, 648, 583, 26, 13, 5, '#ff9a1f', INK, 3);
-    D.box(ctx, 994, 583, 26, 13, 5, '#ff9a1f', INK, 3);
+    D.box(ctx, 108, 576, 30, 16, 5, '#ff9a1f', INK, 3);
+    D.box(ctx, 1146, 576, 30, 16, 5, '#ff9a1f', INK, 3);
   }
 
   function headboard(ctx) {
-    D.box(ctx, 1082, 210, 46, 372, 10, '#202026', INK, 5);
-    D.box(ctx, 1034, 138, 50, 446, 16, '#2263c9', INK, 6);
-    ctx.fillStyle = '#4d8ff0'; D.rr(ctx, 1043, 150, 12, 420, 6); ctx.fill();
-    ctx.fillStyle = '#1a4ea3'; ctx.fillRect(1070, 160, 6, 410);
+    // exhaust stack + front post of the cargo frame (behind the cab)
+    D.box(ctx, 1188, 214, 26, 70, 7, '#2b303b', INK, 4);
+    D.box(ctx, 1190, 250, 34, 360, 8, SLATE, INK, 5);
+    ctx.fillStyle = SLATE_LT; ctx.fillRect(1196, 258, 6, 340);
   }
 
   function bed(ctx) {
-    // main side panel
-    D.box(ctx, 30, 406, 1014, 174, 10, '#2668d2', INK, 6);
-    ctx.fillStyle = '#4a8cf0'; ctx.fillRect(36, 412, 1002, 18);
-    ctx.strokeStyle = INK; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(33, 432); ctx.lineTo(1041, 432); ctx.stroke();
-    // inner frame + slats
-    ctx.strokeStyle = '#174a9e'; ctx.lineWidth = 5;
-    D.rr(ctx, 56, 444, 962, 116, 6); ctx.stroke();
-    ctx.lineWidth = 4;
-    [482, 520].forEach(function (y) {
-      ctx.strokeStyle = '#1a55b0'; ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(1014, y); ctx.stroke();
-      ctx.strokeStyle = 'rgba(120,175,255,.55)'; ctx.beginPath(); ctx.moveTo(60, y + 4); ctx.lineTo(1014, y + 4); ctx.stroke();
+    var x = 30, y = 395, w = 1180, h = 168;
+    var g = ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, OR_LT); g.addColorStop(0.18, OR); g.addColorStop(1, OR_DK);
+    D.box(ctx, x, y, w, h, 8, g, INK, 6);
+    // top lip
+    ctx.fillStyle = '#ffd25e'; ctx.fillRect(x + 6, y + 6, w - 12, 12);
+    ctx.strokeStyle = OR_LINE; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(x + 3, y + 24); ctx.lineTo(x + w - 3, y + 24); ctx.stroke();
+    // plank grooves
+    [450, 505].forEach(function (yy) {
+      ctx.strokeStyle = OR_LINE; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x + 6, yy); ctx.lineTo(x + w - 6, yy); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,220,130,.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x + 6, yy + 5); ctx.lineTo(x + w - 6, yy + 5); ctx.stroke();
     });
-    // vertical posts
-    [62, 368, 678, 980].forEach(function (x) {
-      D.box(ctx, x, 438, 26, 128, 5, '#2f74de', '#174a9e', 4);
-      ctx.fillStyle = 'rgba(140,190,255,.6)'; ctx.fillRect(x + 5, 444, 5, 116);
+    // vertical stakes
+    POSTS.concat([1170]).forEach(function (px) {
+      D.box(ctx, px, y + 4, 30, h - 8, 4, '#f59c14', OR_LINE, 4);
+      ctx.fillStyle = 'rgba(255,225,140,.75)'; ctx.fillRect(px + 6, y + 10, 5, h - 20);
     });
-    // lower lip
-    ctx.fillStyle = '#1d58b8'; ctx.fillRect(36, 562, 1002, 14);
-    // tie-down hooks
-    [75, 380, 690, 992].forEach(function (x) { D.box(ctx, x - 9, 552, 22, 18, 4, '#1d1d22'); });
+    // bottom lip
+    ctx.fillStyle = 'rgba(150,80,0,.35)'; ctx.fillRect(x + 6, y + h - 16, w - 12, 10);
+  }
+
+  function rails(ctx) {
+    // open cargo frame above the side panel (dark slate, like the reference)
+    POSTS.concat([1170]).forEach(function (px) {
+      D.box(ctx, px + 5, 282, 20, 116, 4, SLATE, INK, 4);
+    });
+    D.box(ctx, 30, 266, 1196, 24, 9, SLATE, INK, 5);
+    ctx.fillStyle = SLATE_LT; D.rr(ctx, 40, 271, 1170, 6, 3); ctx.fill();
   }
 
   function cab(ctx) {
     ctx.lineJoin = 'round';
-    // cab shell
+    // shell
     ctx.beginPath();
-    ctx.moveTo(1120, 585);
-    ctx.lineTo(1120, 215);
-    ctx.quadraticCurveTo(1120, 160, 1176, 160);
-    ctx.lineTo(1414, 160);
-    ctx.quadraticCurveTo(1452, 160, 1478, 196);
-    ctx.lineTo(1598, 392);
-    ctx.quadraticCurveTo(1626, 432, 1626, 472);
-    ctx.lineTo(1626, 606);
-    ctx.lineTo(1550, 606);
-    ctx.lineTo(1550, 700);
-    ctx.lineTo(1412, 700);
-    ctx.arc(1260, 707, 152, Math.PI * 2 - 0.05, Math.PI + 0.43, true);
-    ctx.lineTo(1120, 645);
+    ctx.moveTo(1214, 640);
+    ctx.lineTo(1214, 244);
+    ctx.quadraticCurveTo(1214, 210, 1248, 210);
+    ctx.lineTo(1562, 210);
+    ctx.quadraticCurveTo(1602, 210, 1616, 244);
+    ctx.lineTo(1638, 330);
+    ctx.quadraticCurveTo(1644, 352, 1644, 378);
+    ctx.lineTo(1644, 640);
+    ctx.lineTo(1471, 640);
+    ctx.arc(1348, 717, 145, -0.559, -2.582, true);
     ctx.closePath();
-    var g = ctx.createLinearGradient(0, 160, 0, 700);
-    g.addColorStop(0, '#ffa63a'); g.addColorStop(0.45, '#f7901e'); g.addColorStop(1, '#e27a0c');
+    var g = ctx.createLinearGradient(0, 210, 0, 640);
+    g.addColorStop(0, OR_LT); g.addColorStop(0.35, OR); g.addColorStop(1, '#e8900e');
     ctx.fillStyle = g; ctx.fill();
     ctx.strokeStyle = INK; ctx.lineWidth = 6; ctx.stroke();
-
+    // roof visor
+    D.box(ctx, 1250, 178, 330, 36, 14, OR, INK, 5);
+    ctx.fillStyle = '#ffd25e'; D.rr(ctx, 1262, 184, 300, 9, 4); ctx.fill();
     // roof highlight
-    ctx.strokeStyle = 'rgba(255,214,150,.75)'; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(1140, 230); ctx.quadraticCurveTo(1140, 180, 1185, 178); ctx.lineTo(1405, 178); ctx.stroke();
-
+    ctx.strokeStyle = 'rgba(255,230,160,.8)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(1232, 300); ctx.lineTo(1232, 252); ctx.quadraticCurveTo(1232, 230, 1254, 230); ctx.stroke();
     // door
     ctx.beginPath();
-    ctx.moveTo(1172, 548);
-    ctx.lineTo(1172, 230); ctx.quadraticCurveTo(1172, 200, 1202, 200);
-    ctx.lineTo(1438, 200); ctx.quadraticCurveTo(1456, 200, 1463, 216);
-    ctx.lineTo(1540, 418);
-    ctx.lineTo(1540, 540); ctx.quadraticCurveTo(1540, 560, 1520, 560);
-    ctx.lineTo(1186, 560); ctx.quadraticCurveTo(1172, 560, 1172, 548);
-    ctx.closePath();
-    ctx.strokeStyle = 'rgba(160,80,0,.55)'; ctx.lineWidth = 6; ctx.stroke();
-    ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.stroke();
-
+    ctx.moveTo(1290, 600); ctx.lineTo(1290, 270); ctx.quadraticCurveTo(1290, 250, 1312, 250);
+    ctx.lineTo(1560, 250); ctx.quadraticCurveTo(1578, 250, 1582, 270);
+    ctx.lineTo(1592, 380); ctx.lineTo(1592, 596); ctx.quadraticCurveTo(1592, 612, 1576, 612);
+    ctx.lineTo(1304, 612); ctx.quadraticCurveTo(1290, 612, 1290, 600); ctx.closePath();
+    ctx.strokeStyle = OR_LINE; ctx.lineWidth = 6; ctx.stroke();
+    ctx.strokeStyle = 'rgba(29,29,34,.8)'; ctx.lineWidth = 3; ctx.stroke();
     // side window
     ctx.beginPath();
-    ctx.moveTo(1208, 232); ctx.quadraticCurveTo(1208, 218, 1222, 218);
-    ctx.lineTo(1428, 218);
-    ctx.lineTo(1504, 432); ctx.quadraticCurveTo(1506, 444, 1494, 442);
-    ctx.lineTo(1222, 376); ctx.quadraticCurveTo(1208, 372, 1208, 358);
-    ctx.closePath();
-    var wg = ctx.createLinearGradient(1208, 218, 1460, 440);
-    wg.addColorStop(0, '#8fd0ff'); wg.addColorStop(1, '#4a97e6');
+    ctx.moveTo(1332, 274); ctx.lineTo(1540, 274); ctx.quadraticCurveTo(1556, 274, 1558, 290);
+    ctx.lineTo(1568, 436); ctx.quadraticCurveTo(1569, 452, 1553, 452);
+    ctx.lineTo(1332, 452); ctx.quadraticCurveTo(1316, 452, 1316, 436);
+    ctx.lineTo(1316, 290); ctx.quadraticCurveTo(1316, 274, 1332, 274); ctx.closePath();
+    var wg = ctx.createLinearGradient(1316, 274, 1560, 452);
+    wg.addColorStop(0, '#7fd0ff'); wg.addColorStop(1, '#2f8ee0');
     ctx.fillStyle = wg; ctx.fill();
     ctx.save(); ctx.clip();
-    ctx.fillStyle = 'rgba(255,255,255,.32)';
-    ctx.beginPath(); ctx.moveTo(1300, 218); ctx.lineTo(1360, 218); ctx.lineTo(1250, 440); ctx.lineTo(1190, 440); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.18)';
-    ctx.beginPath(); ctx.moveTo(1385, 218); ctx.lineTo(1405, 218); ctx.lineTo(1300, 440); ctx.lineTo(1280, 440); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.35)';
+    ctx.beginPath(); ctx.moveTo(1400, 274); ctx.lineTo(1450, 274); ctx.lineTo(1350, 452); ctx.lineTo(1300, 452); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.2)';
+    ctx.beginPath(); ctx.moveTo(1475, 274); ctx.lineTo(1492, 274); ctx.lineTo(1392, 452); ctx.lineTo(1375, 452); ctx.closePath(); ctx.fill();
     ctx.restore();
     ctx.strokeStyle = INK; ctx.lineWidth = 6; ctx.stroke();
-
-    // windscreen sliver
-    ctx.beginPath();
-    ctx.moveTo(1484, 210); ctx.lineTo(1594, 392); ctx.quadraticCurveTo(1600, 410, 1588, 410);
-    ctx.lineTo(1556, 404); ctx.closePath();
-    ctx.fillStyle = '#5fb0f2'; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
-
     // handle
-    D.box(ctx, 1188, 442, 78, 34, 13, '#1d1d22');
-    D.box(ctx, 1200, 450, 52, 9, 4, '#4a4a54');
-    // mirror arm + mirrors
+    D.box(ctx, 1320, 474, 60, 22, 9, SLATE, INK, 3);
+    // mirror
     ctx.strokeStyle = INK; ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(1500, 310); ctx.lineTo(1528, 345); ctx.moveTo(1498, 400); ctx.lineTo(1528, 370); ctx.stroke();
-    D.box(ctx, 1448, 284, 54, 84, 14, '#1d1d22', INK, 4);
-    D.box(ctx, 1456, 292, 14, 50, 5, '#3c3c46');
-    D.box(ctx, 1450, 374, 50, 54, 12, '#1d1d22', INK, 4);
+    ctx.beginPath(); ctx.moveTo(1540, 320); ctx.lineTo(1586, 300); ctx.moveTo(1540, 420); ctx.lineTo(1586, 440); ctx.stroke();
+    ctx.strokeStyle = SLATE; ctx.lineWidth = 4; ctx.stroke();
+    D.box(ctx, 1500, 290, 44, 166, 16, SLATE, INK, 5);
+    ctx.fillStyle = SLATE_LT; D.rr(ctx, 1508, 300, 9, 140, 4); ctx.fill();
     // headlight
-    ctx.beginPath();
-    ctx.moveTo(1558, 526); ctx.quadraticCurveTo(1558, 516, 1568, 516);
-    ctx.lineTo(1612, 516); ctx.quadraticCurveTo(1626, 518, 1626, 536);
-    ctx.lineTo(1626, 600); ctx.lineTo(1568, 600); ctx.quadraticCurveTo(1558, 600, 1558, 590); ctx.closePath();
-    var hg = ctx.createLinearGradient(1558, 516, 1626, 600);
-    hg.addColorStop(0, '#ffffff'); hg.addColorStop(1, '#d5e3f3');
-    ctx.fillStyle = hg; ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
+    var hg = ctx.createLinearGradient(1602, 512, 1644, 600);
+    hg.addColorStop(0, '#ffffff'); hg.addColorStop(1, '#d4dde8');
+    D.box(ctx, 1602, 512, 46, 88, 14, hg, INK, 5);
     // amber side marker
-    D.box(ctx, 1478, 562, 52, 25, 11, '#ffad2a', INK, 4);
-    // bumper, step, front indicator
-    D.box(ctx, 1544, 606, 106, 102, 16, '#232328', INK, 6);
-    ctx.fillStyle = '#3a3a44'; ctx.fillRect(1552, 616, 90, 10);
-    D.box(ctx, 1584, 646, 42, 30, 7, '#ffae2a', INK, 3);
-    D.box(ctx, 1404, 682, 146, 24, 8, '#232328', INK, 5);
-    // black arch trim over front wheel
-    ctx.strokeStyle = '#1d1d22'; ctx.lineWidth = 16;
-    ctx.beginPath(); ctx.arc(1260, 707, 158, Math.PI * 1.06, Math.PI * 1.97); ctx.stroke();
-  }
-
-  function exhaustCap(ctx) {
-    D.box(ctx, 1036, 132, 46, 14, 6, '#1a4ea3', INK, 4);
+    D.box(ctx, 1520, 560, 46, 20, 8, '#ffad2a', INK, 3);
+    // bumper + front lamp
+    D.box(ctx, 1528, 640, 124, 108, 18, SLATE, INK, 6);
+    ctx.fillStyle = SLATE_LT; ctx.fillRect(1538, 650, 104, 9);
+    D.box(ctx, 1598, 668, 38, 26, 7, '#ffae2a', INK, 3);
+    // front wheel arch flare
+    ctx.strokeStyle = INK; ctx.lineWidth = 30;
+    ctx.beginPath(); ctx.arc(1348, 717, 154, Math.PI * 1.04, Math.PI * 1.96); ctx.stroke();
+    ctx.strokeStyle = SLATE; ctx.lineWidth = 20;
+    ctx.beginPath(); ctx.arc(1348, 717, 154, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
   }
 
   /**
@@ -379,17 +362,17 @@
     headboard(ctx);
     if (hooks && hooks.behindBed) hooks.behindBed(ctx);
     bed(ctx);
+    rails(ctx);
     if (hooks && hooks.overBed) hooks.overBed(ctx);
     cab(ctx);
-    exhaustCap(ctx);
     ctx.restore();
 
     ctx.restore();
   };
 
   /** world position of the exhaust stack tip (for smoke). */
-  Truck.prototype.exhaustWorld = function () { return this.artToWorld(1058, 132); };
-  Truck.prototype.rearWheelWorld = function () { return this.artToWorld(248, WHEEL_Y + WHEEL_R); };
+  Truck.prototype.exhaustWorld = function () { return this.artToWorld(1201, 214); };
+  Truck.prototype.rearWheelWorld = function () { return this.artToWorld(WHEELS[0], WHEEL_Y + WHEEL_R); };
 
   CT.Truck = Truck;
 })(window.CT);

@@ -2,7 +2,7 @@
 (function (CT) {
   'use strict';
   var D = CT.Draw, INK = D.INK;
-  var BOX_W = 296, BOX_H = 190;   // art units (same scale as the truck)
+  var BOX_W = 320, BOX_H = 250;   // art units (same scale as the truck)
 
   var STATE = { DOCK: 'dock', CRANE: 'crane', TRUCK: 'truck', STORED: 'stored' };
 
@@ -54,20 +54,20 @@
 
   function drawStrap(ctx, cx, progress) {
     if (progress <= 0) return;
-    var top = 214, bottom = 562;
+    var top = CT.Truck.BED_TOP - BOX_H - 6, bottom = 558;
     var len = (bottom - top) * Math.min(1, progress);
     ctx.fillStyle = '#1e1e23';
     D.rr(ctx, cx - 15, top, 30, len, 5); ctx.fill();
     ctx.fillStyle = '#3b3b44'; ctx.fillRect(cx - 11, top + 4, 4, Math.max(0, len - 8));
     // ratchet buckles
-    [452, 520].forEach(function (by) {
+    [430, 500].forEach(function (by) {
       if (top + len > by + 22) {
         D.box(ctx, cx - 24, by, 48, 26, 6, '#2c2c33', '#101013', 4);
         D.box(ctx, cx - 14, by + 7, 28, 12, 3, '#6d717b');
       }
     });
     // anchor hook
-    if (progress >= 1) D.box(ctx, cx - 12, 548, 24, 20, 4, '#111114');
+    if (progress >= 1) D.box(ctx, cx - 12, 546, 24, 18, 4, '#111114');
   }
 
   function Cargo(id, def, dock) {
@@ -179,7 +179,7 @@
       var cx = CT.Truck.SLOTS[it.slot] + it.dx;
       var sq = it.pop > 0 ? Math.sin(it.pop * Math.PI) * 0.06 : 0;
       ctx.save();
-      ctx.translate(cx, CT.Truck.BED_TOP + 4);
+      ctx.translate(cx, CT.Truck.BED_TOP);
       ctx.scale(1 + sq, 1 - sq);
       drawBox(ctx, 0, 0, { variant: it.variant });
       ctx.restore();
