@@ -1,0 +1,11 @@
+{
+  "appId": "com.cargotruck.driver",
+  "appName": "Cargo Truck Driver",
+  "webDir": "www",
+  "backgroundColor": "#13284f",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

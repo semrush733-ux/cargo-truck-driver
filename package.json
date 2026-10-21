@@ -1,0 +1,21 @@
+{
+  "name": "cargo-truck-driver",
+  "version": "1.0.0",
+  "description": "2D cargo truck delivery game (HTML5 Canvas + vanilla JS), ready for Capacitor Android packaging.",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server www -p 8080 -c-1",
+    "build:single": "node tools/build-single.js",
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1"
+  }
+}

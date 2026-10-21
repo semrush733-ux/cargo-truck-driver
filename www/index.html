@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cargo Truck Driver</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b3b6f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="description" content="Load the cargo, drive the truck and deliver it to the warehouse. A 2D cargo truck delivery game.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.webmanifest">
+</head>
+<body>
+<div id="app">
+  <canvas id="game" aria-label="Cargo truck game scene"></canvas>
+
+  <!-- ============ MAIN MENU ============ -->
+  <section id="menu" class="screen" aria-label="Main menu">
+    <div class="menu-shade"></div>
+    <div class="menu-inner">
+      <div class="menu-left">
+        <div class="logo">
+          <span class="logo-small">CARGO TRUCK</span>
+          <span class="logo-big">DRIVER</span>
+        </div>
+        <p class="tagline">Load it. Drive it. Deliver it.</p>
+        <div class="menu-actions">
+          <button id="btnPlay" class="btn btn-play" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            <span>PLAY</span>
+          </button>
+          <button id="btnSettings" class="btn btn-icon" type="button" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+          </button>
+          <button id="btnSoundMenu" class="btn btn-icon sound-toggle" type="button" aria-label="Sound on" aria-pressed="true">
+            <svg class="ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
+            <svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3zm18.3 6.3-1.4 1.4L17 13.8l-2.9 2.9-1.4-1.4 2.9-2.9-2.9-2.9 1.4-1.4 2.9 2.9 2.9-2.9 1.4 1.4-2.9 2.9z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="menu-right">
+        <h2 class="cards-title">LEVELS</h2>
+        <div id="levelCards" class="level-cards"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HUD ============ -->
+  <section id="hud" class="screen hud" hidden aria-label="Game controls">
+    <div class="hud-top">
+      <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span></div>
+      <div class="hud-chip cargo-chip" aria-live="polite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" fill="#d79a5c" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5M12 12v9" fill="none" stroke="#1d1d22" stroke-width="1.6"/><path d="M7.5 5.2 16.5 9.8v3" fill="none" stroke="#f3d29f" stroke-width="1.6"/></svg>
+        <span id="cargoLabel">Cargo</span><b id="cargoCount">0/3</b>
+      </div>
+      <div class="hud-progress" aria-hidden="true">
+        <div class="prog-track"><div id="progFill" class="prog-fill"></div>
+          <div id="progTruck" class="prog-truck"></div>
+          <div class="prog-flag"></div>
+        </div>
+        <div class="prog-label"><span id="destName">Delivery Hub</span> · <b id="distLeft">0 m</b></div>
+      </div>
+      <div class="hud-chip speed-chip"><b id="speedVal">0</b><span>km/h</span></div>
+      <button id="btnPause" class="btn btn-icon btn-pause" type="button" aria-label="Pause">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+      </button>
+    </div>
+
+    <div id="banner" class="banner"><div id="bannerTitle" class="banner-title"></div><div id="bannerSub" class="banner-sub"></div></div>
+
+    <div class="controls">
+      <div class="ctrl-left">
+        <button class="pedal pedal-reverse" data-control="reverse" type="button" aria-label="Reverse">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L6 7l6 6V9a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" transform="translate(0 1) scale(.95)"/></svg>
+          <span>REVERSE</span>
+        </button>
+        <button class="pedal pedal-brake" data-control="brake" type="button" aria-label="Brake">
+          <span class="pedal-grip"></span>
+          <span class="pedal-label">BRAKE</span>
+        </button>
+      </div>
+      <div class="ctrl-center">
+        <button id="btnAction" class="btn-action" type="button">
+          <span id="actionIcon" class="action-icon" aria-hidden="true"></span>
+          <span id="actionText">LOAD</span>
+        </button>
+        <div id="actionHint" class="action-hint"></div>
+      </div>
+      <div class="ctrl-right">
+        <button class="pedal pedal-gas" data-control="gas" type="button" aria-label="Gas">
+          <span class="pedal-grip"></span>
+          <span class="pedal-label">GAS</span>
+        </button>
+      </div>
+    </div>
+    <div id="lockNote" class="lock-note" hidden>Load all cargo first</div>
+  </section>
+
+  <!-- ============ PAUSE ============ -->
+  <section id="pause" class="screen modal-wrap" hidden aria-label="Paused">
+    <div class="modal">
+      <h2 class="modal-title">PAUSED</h2>
+      <div class="modal-buttons">
+        <button id="btnResume" class="btn btn-green" type="button">RESUME</button>
+        <button id="btnRestart" class="btn btn-orange" type="button">RESTART LEVEL</button>
+        <button id="btnResetTruck" class="btn btn-blue" type="button">RESET TRUCK TO START</button>
+        <div class="row">
+          <button id="btnSoundPause" class="btn btn-ghost sound-toggle" type="button" aria-pressed="true">
+            <svg class="ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
+            <svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3zm18.3 6.3-1.4 1.4L17 13.8l-2.9 2.9-1.4-1.4 2.9-2.9-2.9-2.9 1.4-1.4 2.9 2.9 2.9-2.9 1.4 1.4-2.9 2.9z"/></svg>
+            <span class="sound-text">SOUND ON</span>
+          </button>
+          <button id="btnMenuFromPause" class="btn btn-ghost" type="button">MAIN MENU</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WIN ============ -->
+  <section id="win" class="screen modal-wrap" hidden aria-label="Level complete">
+    <div class="modal modal-win">
+      <div class="ribbon">DELIVERY SUCCESSFUL!</div>
+      <div class="stars">
+        <span class="star" data-i="0"></span><span class="star star-mid" data-i="1"></span><span class="star" data-i="2"></span>
+      </div>
+      <div class="stats">
+        <div class="stat"><span>Cargo delivered</span><b id="statCargo">3/3</b></div>
+        <div class="stat"><span>Distance</span><b id="statDist">0 m</b></div>
+        <div class="stat"><span>Time</span><b id="statTime">0:00</b></div>
+      </div>
+      <p id="bestNote" class="best-note"></p>
+      <div class="modal-buttons row">
+        <button id="btnWinRestart" class="btn btn-orange" type="button">RESTART</button>
+        <button id="btnWinMenu" class="btn btn-blue" type="button">MAIN MENU</button>
+      </div>
+      <p class="soon-note">More levels are coming soon.</p>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="settings" class="screen modal-wrap" hidden aria-label="Settings">
+    <div class="modal">
+      <h2 class="modal-title">SETTINGS</h2>
+      <div class="setting-list">
+        <label class="setting"><span>Sound effects</span><input id="optSound" type="checkbox" class="switch"></label>
+        <label class="setting"><span>Engine sound</span><input id="optEngine" type="checkbox" class="switch"></label>
+        <label class="setting"><span>Vibration</span><input id="optVibrate" type="checkbox" class="switch"></label>
+        <div class="setting"><span>Saved progress</span><button id="btnResetProgress" class="btn btn-small btn-danger" type="button">RESET</button></div>
+      </div>
+      <p class="keys-help"><b>Keyboard:</b> → / D gas · ← / A brake · ↓ / S reverse · Space brake · E load/deliver · P pause</p>
+      <div class="modal-buttons"><button id="btnCloseSettings" class="btn btn-green" type="button">DONE</button></div>
+    </div>
+  </section>
+
+  <div id="rotateHint" class="rotate-hint" hidden>Turn your phone sideways for the best view</div>
+  <div id="flash" class="flash"></div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/controls.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/truck.js"></script>
+<script src="js/cargo.js"></script>
+<script src="js/crane.js"></script>
+<script src="js/world.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/level1.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
