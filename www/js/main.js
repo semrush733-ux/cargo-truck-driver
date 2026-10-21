@@ -65,7 +65,7 @@
         var S = CT.Game.STATES;
         if (game.state === S.PAUSED) game.resume();
         else if (game.isPlaying()) game.pause();
-        else if (game.state === S.LEVEL_COMPLETE) { CT.UI.hideWin(); game.toMenu(); }
+        else if (game.state === S.LEVEL_COMPLETE || game.state === S.LEVEL_FAILED) { CT.UI.hideWin(); CT.UI.hideFail(); game.toMenu(); }
         else if (App.exitApp) App.exitApp();
       });
     }

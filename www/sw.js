@@ -1,9 +1,9 @@
 /* sw.js — caches the game files so it keeps working offline after the first visit. */
-var CACHE = 'cargo-truck-driver-v1';
+var CACHE = 'cargo-truck-driver-v2';
 var FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/storage.js', 'js/audio.js', 'js/controls.js', 'js/draw.js', 'js/truck.js', 'js/cargo.js', 'js/crane.js',
-  'js/world.js', 'js/effects.js', 'js/levels.js', 'js/level1.js', 'js/game.js', 'js/ui.js', 'js/main.js',
+  'js/world.js', 'js/traffic.js', 'js/view3d.js', 'js/effects.js', 'js/levels.js', 'js/garage.js', 'js/level1.js', 'js/game.js', 'js/ui.js', 'js/main.js',
   'assets/icon-192.png', 'assets/icon-512.png'
 ];
 self.addEventListener('install', function (e) {

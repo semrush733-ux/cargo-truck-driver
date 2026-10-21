@@ -49,6 +49,27 @@
         el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       });
 
+      Array.prototype.forEach.call(root.querySelectorAll('[data-tap]'), function (el) {
+        el.addEventListener('pointerdown', function (e) {
+          e.preventDefault(); CT.Audio.unlock();
+          el.classList.add('active'); setTimeout(function () { el.classList.remove('active'); }, 150);
+          Controls.fire(el.getAttribute('data-tap'));
+        });
+        el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      });
+
+      // gyro steering: tilt the phone left/right to change lanes
+      var gyroSide = 0;
+      window.addEventListener('deviceorientation', function (e) {
+        if (!Controls.gyro || !Controls.enabled || e.beta == null) return;
+        var ang = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+        var tilt = ang === 90 ? e.beta : ang === -90 || ang === 270 ? -e.beta : e.gamma;
+        Controls.tilt = tilt;
+        if (tilt < -15 && gyroSide !== -1) { gyroSide = -1; Controls.fire('lane', 1); }
+        else if (tilt > 15 && gyroSide !== 1) { gyroSide = 1; Controls.fire('lane', 0); }
+        else if (Math.abs(tilt) < 7) gyroSide = 0;
+      });
+
       window.addEventListener('keydown', function (e) {
         var ctrl = KEYMAP[e.code];
         if (ctrl) {
@@ -63,6 +84,9 @@
           if (Controls.captureKeys) { e.preventDefault(); Controls.fire('action'); }
         }
         else if (e.code === 'KeyP' || e.code === 'Escape') { Controls.fire('pause'); }
+        else if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'KeyL') { if (Controls.captureKeys) { e.preventDefault(); Controls.fire('lane'); } }
+        else if (e.code === 'KeyC' || e.code === 'KeyV') { if (Controls.captureKeys) Controls.fire('camera'); }
+        else if (e.code === 'KeyH') { if (Controls.captureKeys) Controls.fire('horn'); }
       });
       window.addEventListener('keyup', function (e) {
         var ctrl = KEYMAP[e.code];
@@ -74,6 +98,7 @@
     /** Recompute state; called once per frame. */
     update: function () {
       var s = this.state;
+      if (CT.botInput) { s.gas = !!CT.botInput.gas; s.brake = !!CT.botInput.brake; s.reverse = !!CT.botInput.reverse; if (!this.enabled) s.gas = s.brake = s.reverse = false; return s; }
       if (!this.enabled) { s.gas = s.brake = s.reverse = false; return s; }
       s.gas = countActive('gas') > 0;
       s.brake = countActive('brake') > 0;
@@ -93,6 +118,14 @@
     },
 
     captureKeys: false,
+    gyro: false,
+    tilt: 0,
+    enableGyro: function (on) {
+      this.gyro = !!on;
+      if (on && window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().catch(function () {});
+      }
+    },
     on: function (name, fn) { actionHandlers[name] = fn; },
     fire: function (name, arg) { if (actionHandlers[name]) actionHandlers[name](arg); }
   };

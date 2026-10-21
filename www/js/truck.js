@@ -20,7 +20,7 @@
     rolling: 46,
     drag: 0.12,
     weightFactor: 0.07, // each unit of cargo weight slows acceleration a little
-    gravity: 900
+    gravity: 520
   };
 
   function Truck(cfg) {
@@ -34,6 +34,7 @@
     this.cargoWeight = 0;
     this.onImpact = null;
     this.brakeLight = 0;
+    this.lane = 0; this.laneT = 0; this.laneV = 0;
   }
 
   Truck.S = S;
@@ -47,6 +48,7 @@
   Truck.prototype.place = function (x, terrain) {
     this.x = x; this.v = 0; this.throttle = this.revThrottle = 0;
     this.accelSm = 0; this.pitch = this.pitchV = this.bounce = this.bounceV = 0;
+    this.lane = 0; this.laneT = 0; this.laneV = 0;
     this.followTerrain(terrain);
   };
 
@@ -74,17 +76,18 @@
     var mass = 1 + this.cargoWeight * c.weightFactor;
     var v0 = this.v, v = this.v, a = 0, decel = 0;
 
-    if (wantBrake) decel += c.brake;
+    var grip = c.grip || 1;
+    if (wantBrake) decel += c.brake * (0.35 + 0.65 * grip);
     if (this.throttle > 0.01) {
       if (v < -2) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
-      else a += (c.accel / mass) * this.throttle * Math.max(0, 1 - Math.pow(Math.max(0, v) / c.maxSpeed, 2));
+      else a += (c.accel / mass) * (0.55 + 0.45 * grip) * this.throttle * Math.max(0, 1 - Math.pow(Math.max(0, v) / c.maxSpeed, 2));
     }
     if (this.revThrottle > 0.01) {
       if (v > 2) decel += c.brake * 0.85 * this.revThrottle;          // reverse while rolling forward = brake first
       else a -= (c.reverseAccel / mass) * this.revThrottle * Math.max(0, 1 - Math.pow(Math.max(0, -v) / c.reverseMax, 2));
     }
     decel += c.rolling + Math.abs(v) * c.drag;
-    a -= c.gravity * Math.sin(this.slope);
+    a += c.gravity * Math.sin(this.slope);          // uphill (slope < 0) slows the truck
 
     v += a * dt;
     var dv = decel * dt;
@@ -123,7 +126,17 @@
     this.bounce += this.bounceV * dt;
 
     this.brakeLight += ((this.braking ? 1 : 0) - this.brakeLight) * Math.min(1, dt * 12);
+
+    // lane change animation
+    var prevT = this.laneT;
+    this.laneT = D.approach(this.laneT, this.lane, dt * 1.9);
+    this.laneV = dt > 0 ? (this.laneT - prevT) / dt : 0;
   };
+
+  /** 0 = near/right lane, 1 = far/left lane, -1 while changing lanes. */
+  Truck.prototype.laneIndex = function () { return this.laneT < 0.2 ? 0 : this.laneT > 0.8 ? 1 : -1; };
+  Truck.prototype.lanesOccupied = function () { var i = this.laneIndex(); return i === -1 ? [0, 1] : [i]; };
+  Truck.prototype.laneY = function () { var t = this.laneT; return -34 * t * t * (3 - 2 * t); };
 
   Truck.prototype.jolt = function (strength) {
     this.pitchV += strength * 0.004;
@@ -137,13 +150,16 @@
     var ang = this.slope + this.pitch;
     var lx = (ax - OX) * S, ly = (ay - OY) * S;
     var cs = Math.cos(ang), sn = Math.sin(ang);
-    return { x: this.x + lx * cs - ly * sn, y: this.y + this.bounce + lx * sn + ly * cs };
+    return { x: this.x + lx * cs - ly * sn, y: this.y + this.laneY() + this.bounce + lx * sn + ly * cs };
   };
 
   Truck.prototype.slotWorld = function (i) { return this.artToWorld(SLOTS[i], BED_TOP); };
 
   // ------------------------------------------------------------------ drawing
-  var OR = '#f8a619', OR_LT = '#ffc23d', OR_DK = '#d9820b', OR_LINE = '#c47208';
+  var OR = '#f8a619', OR_LT = '#ffc23d', OR_DK = '#d9820b', OR_LINE = '#c47208', LIP = '#ffd25e';
+  var TIME = 0;
+  Truck.setPaint = function (p) { OR = p.body; OR_LT = p.light; OR_DK = p.dark; OR_LINE = p.line; LIP = p.lip; };
+  Truck.paintColors = function () { return { body: OR, light: OR_LT, dark: OR_DK, line: OR_LINE, lip: LIP }; };
   var SLATE = '#3b4250', SLATE_LT = '#545c6c';
   var POSTS = [36, 262, 498, 734, 970];
 
@@ -230,7 +246,7 @@
     g.addColorStop(0, OR_LT); g.addColorStop(0.18, OR); g.addColorStop(1, OR_DK);
     D.box(ctx, x, y, w, h, 8, g, INK, 6);
     // top lip
-    ctx.fillStyle = '#ffd25e'; ctx.fillRect(x + 6, y + 6, w - 12, 12);
+    ctx.fillStyle = LIP; ctx.fillRect(x + 6, y + 6, w - 12, 12);
     ctx.strokeStyle = OR_LINE; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(x + 3, y + 24); ctx.lineTo(x + w - 3, y + 24); ctx.stroke();
     // plank grooves
@@ -240,7 +256,7 @@
     });
     // vertical stakes
     POSTS.concat([1170]).forEach(function (px) {
-      D.box(ctx, px, y + 4, 30, h - 8, 4, '#f59c14', OR_LINE, 4);
+      D.box(ctx, px, y + 4, 30, h - 8, 4, OR, OR_LINE, 4);
       ctx.fillStyle = 'rgba(255,225,140,.75)'; ctx.fillRect(px + 6, y + 10, 5, h - 20);
     });
     // bottom lip
@@ -254,6 +270,41 @@
     });
     D.box(ctx, 30, 266, 1196, 24, 9, SLATE, INK, 5);
     ctx.fillStyle = SLATE_LT; D.rr(ctx, 40, 271, 1170, 6, 3); ctx.fill();
+  }
+
+
+  /** Bunny driver seen through the side window (facing right). */
+  function bunnySide(ctx) {
+    var blink = (TIME % 4.2) < 0.13;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    D.box(ctx, 1320, 320, 46, 150, 14, '#2b303b');                       // seat back
+    ctx.fillStyle = '#3d7fe0'; ctx.strokeStyle = INK; ctx.lineWidth = 4;   // blue overalls
+    ctx.beginPath(); ctx.ellipse(1426, 486, 72, 62, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fbfaf7';
+    ctx.beginPath(); ctx.ellipse(1430, 440, 30, 22, 0, 0, Math.PI * 2); ctx.fill();
+    // ears (back ear first)
+    ctx.save(); ctx.translate(1424, 300); ctx.rotate(-0.12);
+    ctx.fillStyle = '#e9e4dc'; ctx.beginPath(); ctx.ellipse(0, 0, 15, 50, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    ctx.save(); ctx.translate(1404, 304); ctx.rotate(-0.42);
+    ctx.fillStyle = '#fbfaf7'; ctx.beginPath(); ctx.ellipse(0, 0, 16, 54, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffb3c8'; ctx.beginPath(); ctx.ellipse(2, 4, 7, 38, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // head
+    D.circle(ctx, 1440, 376, 46, '#fbfaf7', INK, 4);
+    // cap in the truck colour
+    ctx.fillStyle = OR; ctx.beginPath(); ctx.arc(1440, 368, 47, Math.PI * 1.08, Math.PI * 1.98); ctx.closePath(); ctx.fill(); ctx.stroke();
+    D.box(ctx, 1468, 352, 46, 12, 5, OR_DK, INK, 3);
+    // face
+    if (blink) { ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(1460, 380); ctx.lineTo(1474, 380); ctx.stroke(); }
+    else { D.circle(ctx, 1467, 380, 7, INK); D.circle(ctx, 1469, 377, 2.5, '#ffffff'); }
+    D.circle(ctx, 1478, 398, 15, '#ffffff', INK, 3);
+    D.circle(ctx, 1490, 391, 6, '#ff8fb1', INK, 2);
+    ctx.fillStyle = 'rgba(255,140,170,.55)'; ctx.beginPath(); ctx.arc(1454, 402, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(1484, 404); ctx.quadraticCurveTo(1478, 412, 1472, 406); ctx.stroke();
+    // steering wheel + paw
+    ctx.strokeStyle = '#1d1f25'; ctx.lineWidth = 12; ctx.beginPath(); ctx.ellipse(1532, 436, 12, 46, 0.2, 0, Math.PI * 2); ctx.stroke();
+    D.circle(ctx, 1520, 422, 13, '#fbfaf7', INK, 3);
   }
 
   function cab(ctx) {
@@ -272,12 +323,12 @@
     ctx.arc(1348, 717, 145, -0.559, -2.582, true);
     ctx.closePath();
     var g = ctx.createLinearGradient(0, 210, 0, 640);
-    g.addColorStop(0, OR_LT); g.addColorStop(0.35, OR); g.addColorStop(1, '#e8900e');
+    g.addColorStop(0, OR_LT); g.addColorStop(0.35, OR); g.addColorStop(1, OR_DK);
     ctx.fillStyle = g; ctx.fill();
     ctx.strokeStyle = INK; ctx.lineWidth = 6; ctx.stroke();
     // roof visor
     D.box(ctx, 1250, 178, 330, 36, 14, OR, INK, 5);
-    ctx.fillStyle = '#ffd25e'; D.rr(ctx, 1262, 184, 300, 9, 4); ctx.fill();
+    ctx.fillStyle = LIP; D.rr(ctx, 1262, 184, 300, 9, 4); ctx.fill();
     // roof highlight
     ctx.strokeStyle = 'rgba(255,230,160,.8)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(1232, 300); ctx.lineTo(1232, 252); ctx.quadraticCurveTo(1232, 230, 1254, 230); ctx.stroke();
@@ -299,6 +350,8 @@
     wg.addColorStop(0, '#7fd0ff'); wg.addColorStop(1, '#2f8ee0');
     ctx.fillStyle = wg; ctx.fill();
     ctx.save(); ctx.clip();
+    bunnySide(ctx);
+    ctx.fillStyle = 'rgba(120,190,240,.2)'; ctx.fillRect(1300, 260, 280, 200);
     ctx.fillStyle = 'rgba(255,255,255,.35)';
     ctx.beginPath(); ctx.moveTo(1400, 274); ctx.lineTo(1450, 274); ctx.lineTo(1350, 452); ctx.lineTo(1300, 452); ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,.2)';
@@ -333,15 +386,23 @@
   /**
    * hooks.behindBed(ctx) / hooks.overBed(ctx) draw the cargo + straps in art space.
    */
-  Truck.prototype.draw = function (ctx, hooks) {
+  Truck.prototype.draw = function (ctx, hooks, opts) {
+    TIME = (opts && opts.t) || 0;
+    var ly = this.laneY();
     // ground shadow
     ctx.save();
     ctx.fillStyle = 'rgba(20,30,20,.28)';
-    ctx.beginPath(); ctx.ellipse(this.x + 10, this.y + 3, Truck.LENGTH * 0.52, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(this.x + 10, this.y + ly + 3, Truck.LENGTH * 0.52, 10, 0, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
     ctx.save();
-    ctx.translate(this.x, this.y);
+    ctx.translate(this.x, this.y + ly);
+    if (opts && opts.night) {
+      var hx = (1648 - OX) * S, hy = (556 - OY) * S;
+      var hg = ctx.createLinearGradient(hx, 0, hx + 520, 0);
+      hg.addColorStop(0, 'rgba(255,244,190,.55)'); hg.addColorStop(1, 'rgba(255,244,190,0)');
+      ctx.fillStyle = hg; ctx.beginPath(); ctx.moveTo(hx, hy - 8); ctx.lineTo(hx + 520, hy - 60); ctx.lineTo(hx + 520, hy + 70); ctx.lineTo(hx, hy + 10); ctx.closePath(); ctx.fill();
+    }
     ctx.rotate(this.slope);
     ctx.scale(S, S);
     ctx.translate(-OX, -OY);

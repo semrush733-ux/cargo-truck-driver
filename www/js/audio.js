@@ -63,7 +63,14 @@
       noise(t + 0.82, 0.8, 0.12, 6000, 0.6, 'highpass');
     },
     brake: function (t) { noise(t, 0.35, 0.12, 3000, 6, 'bandpass'); },
-    star: function (t) { tone('triangle', 1047, 1568, t, 0.25, 0.22); }
+    star: function (t) { tone('triangle', 1047, 1568, t, 0.25, 0.22); tone('sine', 2093, 2093, t + 0.08, 0.3, 0.08); },
+    crash: function (t) { noise(t, 0.5, 0.9, 900, 0.6, 'lowpass'); tone('sawtooth', 160, 50, t, 0.4, 0.35); noise(t + 0.05, 0.4, 0.4, 3500, 1.5, 'bandpass'); },
+    blinker: function (t) { tone('square', 1800, 1800, t, 0.02, 0.07); tone('square', 1500, 1500, t + 0.32, 0.02, 0.07); },
+    alarm: function (t) { tone('square', 880, 880, t, 0.12, 0.12); tone('square', 660, 660, t + 0.14, 0.12, 0.12); },
+    squeal: function (t) { noise(t, 0.45, 0.18, 2600, 9, 'bandpass'); tone('sawtooth', 1300, 1100, t, 0.4, 0.03); },
+    fail: function (t) { [523, 440, 349, 262].forEach(function (f, i) { tone('triangle', f, f * 0.97, t + i * 0.18, 0.3, 0.2); }); },
+    coin: function (t) { tone('square', 988, 988, t, 0.06, 0.1); tone('square', 1319, 1319, t + 0.06, 0.18, 0.1); },
+    upgrade: function (t) { [392, 523, 659, 784, 1047].forEach(function (f, i) { tone('triangle', f, f, t + i * 0.06, 0.16, 0.2); }); }
   };
 
   CT.Audio = {

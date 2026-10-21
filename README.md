@@ -2,7 +2,17 @@
 
 A 2D side-view cargo delivery game built with HTML5 Canvas and vanilla JavaScript. No frameworks and no image files: the truck, the cranes, the warehouses and the scenery are all drawn in code.
 
-**Level 1 (Tutorial)** is fully playable. You load 3 boxes with the depot crane, drive about 120 m to the Delivery Hub, stop inside the green zone, and the hub crane unloads the boxes. The game then shows the win screen with 3 stars. Levels 2 to 4 are locked placeholders marked "Coming soon".
+**50 playable levels** in 5 chapters: Green Valley, Metro City, Sahara Run, Frozen Pass and Night Express. In every level you load the cargo with the depot crane, drive to the Delivery Hub, stop in the green zone, and the hub crane unloads the cargo.
+
+What the game has:
+- **Traffic.** Two lanes with cars, vans, pickups and buses. Tap **LANE** to overtake. Traffic lights must be obeyed, and running a red costs the "Safe driving" star.
+- **Challenges.** Hills (they get steeper level by level), sharp bends with speed limits (taking one too fast damages the cargo), speed bumps, snow with low grip, desert sand, night driving with headlights, and time limits from level 8.
+- **Cargo types.** Boxes, crates, barrels, steel (heavy, so slower acceleration) and fragile glass (double damage).
+- **3 camera views.** SIDE, **TPP** (behind the truck) and **FPP** (inside the cab, with the steering wheel, gauges and mirrors). The camera button is next to Pause, or press C.
+- **Bunny driver.** You can see the bunny through the side window, in the left mirror in TPP, and in the interior rear-view mirror in FPP, where it blinks. Its paws are on the steering wheel.
+- **Stars.** ★ Cargo delivered, ★ Safe driving (no crashes, no red lights, cargo ≥ 90%), ★ Fast delivery (beat the target time). The win screen shows which stars you earned and why.
+- **Garage.** Levels pay coins. Spend them on Engine (top speed from 180 km/h up to about 300 km/h), Tyres (grip), Suspension (less cargo damage) and Brakes, each with 5 levels, plus 6 paint colours.
+- **Gyro steering** (optional, in Settings). Tilt the phone left or right to change lanes.
 
 ---
 
@@ -33,6 +43,9 @@ You can also double-click `www/index.html`, because the game works from `file://
 | Brake / stop | **BRAKE** pedal | ← or A, Space |
 | Reverse | **REVERSE** button | ↓ or S |
 | Load / Deliver | big centre button | E or Enter |
+| Change lane | **LANE** button / tilt phone (gyro) | ↑ or W |
+| Camera (Side / TPP / FPP) | 👁 button | C |
+| Horn | 📢 button | H |
 | Pause | ⏸ top-right | P or Esc |
 
 Pedals work while you hold them and stop as soon as you let go. Multi-touch works, so you can hold brake and tap reverse at the same time.
@@ -56,7 +69,10 @@ cargo-truck-driver/
 │   ├── js/world.js           sky, hills, props, warehouses, road, delivery zone
 │   ├── js/effects.js         dust, exhaust, sparkles, confetti, floating text
 │   ├── js/levels.js          level registry + config format (docs inside)
-│   ├── js/level1.js          Level 1 config
+│   ├── js/level1.js          Level 1 (tutorial) config + generates levels 2–50
+│   ├── js/garage.js          upgrades, paints, coins, truck stats
+│   ├── js/traffic.js         cars, car-following AI, traffic lights, collisions
+│   ├── js/view3d.js          TPP chase + FPP cab cameras (pseudo-3D), bunny in mirrors
 │   ├── js/game.js            state machine, update loop, camera, rendering
 │   ├── js/ui.js              DOM screens and buttons
 │   ├── js/main.js            boot, single rAF loop, pause on background
@@ -85,13 +101,11 @@ The road is flat and has no obstacles. If you overshoot the zone, you just rever
 
 ---
 
-## 3. Adding more levels later
+## 3. Levels and balancing
 
-1. Copy `www/js/level1.js` to `www/js/level2.js`, change `id: 2`, and adjust its config: cargo count and weight, truck stats, road `start`/`end`, `terrain` points (for hills), zone position, signs and stars mode.
-2. Add `<script src="js/level2.js"></script>` after `level1.js` in `index.html`, and add the file to `FILES` in `sw.js`.
-3. Remove `2` from the placeholder list at the bottom of `levels.js`.
+The `generate(n)` function in `www/js/levels.js` builds levels 2 to 50 from a fixed seed, so every player gets the same levels. Difficulty rises through each chapter and across the whole game: longer roads, steeper hills, more bends, bumps, traffic and lights, and tighter time limits. To tune the game, change the numbers in `generate()`. To hand-make a level, register a config like the one in `level1.js` with the same `id`.
 
-Level 2 unlocks automatically once Level 1 is completed. The full config format is documented at the top of `levels.js`. The truck physics already follows `terrain` slopes, and `cargo.secured: false` lets boxes slide more for harder levels.
+All 50 levels were checked with an autopilot bot that drives the **base truck (no upgrades)**. Every level can be finished inside its time limit. A 3-star result on later levels needs clean driving, and upgrades make it easier.
 
 ---
 

@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#1b3b6f">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="description" content="Load the cargo, drive the truck and deliver it to the warehouse. A 2D cargo truck delivery game.">
+<meta name="description" content="Load the cargo, drive the truck through traffic, hills, snow and desert, and deliver it. 50 levels, upgrades and 3 camera views.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@700;800;900&display=swap">
@@ -15,6 +15,19 @@
 <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gStar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6b0"/><stop offset=".45" stop-color="#ffd21f"/><stop offset="1" stop-color="#f59a0b"/>
+    </linearGradient>
+    <linearGradient id="gStarOff" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#25406f"/><stop offset="1" stop-color="#0d1c39"/>
+    </linearGradient>
+    <symbol id="starShape" viewBox="0 0 100 100">
+      <path d="M50 6 L62.5 34.5 L93 37.5 L70 58 L76.5 89 L50 73 L23.5 89 L30 58 L7 37.5 L37.5 34.5 Z"/>
+    </symbol>
+  </defs>
+</svg>
 <div id="app">
   <canvas id="game" aria-label="Cargo truck game scene"></canvas>
 
@@ -31,7 +44,7 @@
         <div class="menu-actions">
           <button id="btnPlay" class="btn btn-play" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
-            <span>PLAY</span>
+            <span class="play-text"><span>PLAY</span><small id="playLevel">Level 1</small></span>
           </button>
           <button id="btnSettings" class="btn btn-icon" type="button" aria-label="Settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
@@ -41,10 +54,20 @@
             <svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3zm18.3 6.3-1.4 1.4L17 13.8l-2.9 2.9-1.4-1.4 2.9-2.9-2.9-2.9 1.4-1.4 2.9 2.9 2.9-2.9 1.4 1.4-2.9 2.9z"/></svg>
           </button>
         </div>
+        <div class="menu-row2">
+          <button id="btnLevels" class="btn btn-blue btn-mid" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>LEVELS</button>
+          <button id="btnGarage" class="btn btn-orange btn-mid" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19 13.6 9.9c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>GARAGE</button>
+        </div>
       </div>
       <div class="menu-right">
-        <h2 class="cards-title">LEVELS</h2>
-        <div id="levelCards" class="level-cards"></div>
+        <div class="progress-card">
+          <div class="pc-row"><span class="coin-ico"></span><b id="menuCoins">0</b><span>coins</span></div>
+          <div class="pc-row"><svg class="pc-star"><use href="#starShape"/></svg><b id="menuStars">0</b><span>/ 150 stars</span></div>
+          <div class="pc-row"><span class="pc-flag"></span><b id="menuDone">0</b><span>/ 50 levels</span></div>
+          <div class="pc-bar"><i id="menuBar"></i></div>
+        </div>
       </div>
     </div>
   </section>
@@ -54,8 +77,9 @@
     <div class="hud-top">
       <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span></div>
       <div class="hud-chip cargo-chip" aria-live="polite">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" fill="#d79a5c" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5M12 12v9" fill="none" stroke="#1d1d22" stroke-width="1.6"/><path d="M7.5 5.2 16.5 9.8v3" fill="none" stroke="#f3d29f" stroke-width="1.6"/></svg>
-        <span id="cargoLabel">Cargo</span><b id="cargoCount">0/3</b>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" fill="#d79a5c" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5M12 12v9" fill="none" stroke="#1d1d22" stroke-width="1.6"/></svg>
+        <b id="cargoCount">0/3</b>
+        <span class="health"><i id="healthBar"></i></span>
       </div>
       <div class="hud-progress" aria-hidden="true">
         <div class="prog-track"><div id="progFill" class="prog-fill"></div>
@@ -64,7 +88,12 @@
         </div>
         <div class="prog-label"><span id="destName">Delivery Hub</span> · <b id="distLeft">0 m</b></div>
       </div>
+      <div id="timerChip" class="hud-chip timer-chip" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.5 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg><b id="timerVal">0:00</b></div>
       <div class="hud-chip speed-chip"><b id="speedVal">0</b><span>km/h</span></div>
+      <button id="btnCamera" class="btn btn-icon btn-pause cam-btn" type="button" aria-label="Change camera" data-tap="camera">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+        <span id="camLabel">SIDE</span>
+      </button>
       <button id="btnPause" class="btn btn-icon btn-pause" type="button" aria-label="Pause">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
       </button>
@@ -74,10 +103,15 @@
 
     <div class="controls">
       <div class="ctrl-left">
-        <button class="pedal pedal-reverse" data-control="reverse" type="button" aria-label="Reverse">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L6 7l6 6V9a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" transform="translate(0 1) scale(.95)"/></svg>
-          <span>REVERSE</span>
-        </button>
+        <div class="ctrl-stack">
+          <button class="round-btn horn-btn" data-tap="horn" type="button" aria-label="Horn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4h3l6 4V6L6 10zm13 2a4 4 0 0 0-2-3.5v7A4 4 0 0 0 16 12zm-2-8v2a7 7 0 0 1 0 12v2a9 9 0 0 0 0-16z"/></svg>
+          </button>
+          <button class="pedal pedal-reverse" data-control="reverse" type="button" aria-label="Reverse">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L6 7l6 6V9a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z" transform="translate(0 1) scale(.95)"/></svg>
+            <span>REVERSE</span>
+          </button>
+        </div>
         <button class="pedal pedal-brake" data-control="brake" type="button" aria-label="Brake">
           <span class="pedal-grip"></span>
           <span class="pedal-label">BRAKE</span>
@@ -91,6 +125,10 @@
         <div id="actionHint" class="action-hint"></div>
       </div>
       <div class="ctrl-right">
+        <button id="btnLane" class="round-btn lane-btn" data-tap="lane" type="button" aria-label="Change lane">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 2 8h3.5v13h3V8H12zm10 18 5-5h-3.5V3h-3v13H12z"/></svg>
+          <span>LANE</span>
+        </button>
         <button class="pedal pedal-gas" data-control="gas" type="button" aria-label="Gas">
           <span class="pedal-grip"></span>
           <span class="pedal-label">GAS</span>
@@ -124,20 +162,71 @@
   <section id="win" class="screen modal-wrap" hidden aria-label="Level complete">
     <div class="modal modal-win">
       <div class="ribbon">DELIVERY SUCCESSFUL!</div>
-      <div class="stars">
-        <span class="star" data-i="0"></span><span class="star star-mid" data-i="1"></span><span class="star" data-i="2"></span>
-      </div>
-      <div class="stats">
-        <div class="stat"><span>Cargo delivered</span><b id="statCargo">3/3</b></div>
+      <div class="win-level" id="winLevel">Level 1</div>
+      <div class="stars" id="winStars"></div>
+      <ul class="criteria" id="winCriteria"></ul>
+      <div class="win-meta">
         <div class="stat"><span>Distance</span><b id="statDist">0 m</b></div>
         <div class="stat"><span>Time</span><b id="statTime">0:00</b></div>
+        <div class="stat coins"><span>Coins earned</span><b id="statCoins">+0</b></div>
       </div>
       <p id="bestNote" class="best-note"></p>
-      <div class="modal-buttons row">
-        <button id="btnWinRestart" class="btn btn-orange" type="button">RESTART</button>
-        <button id="btnWinMenu" class="btn btn-blue" type="button">MAIN MENU</button>
+      <div class="modal-buttons">
+        <button id="btnNext" class="btn btn-green btn-big" type="button">NEXT LEVEL ▶</button>
+        <div class="row">
+          <button id="btnWinRestart" class="btn btn-orange" type="button">REPLAY</button>
+          <button id="btnWinGarage" class="btn btn-blue" type="button">GARAGE</button>
+          <button id="btnWinMenu" class="btn btn-ghost" type="button">MENU</button>
+        </div>
       </div>
-      <p class="soon-note">More levels are coming soon.</p>
+    </div>
+  </section>
+
+  <!-- ============ FAIL ============ -->
+  <section id="fail" class="screen modal-wrap" hidden aria-label="Level failed">
+    <div class="modal modal-fail">
+      <div class="ribbon ribbon-red" id="failTitle">LEVEL FAILED</div>
+      <p class="fail-text" id="failText"></p>
+      <div class="modal-buttons">
+        <button id="btnRetry" class="btn btn-green btn-big" type="button">TRY AGAIN</button>
+        <div class="row">
+          <button id="btnFailGarage" class="btn btn-orange" type="button">GARAGE</button>
+          <button id="btnFailMenu" class="btn btn-ghost" type="button">MENU</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL SELECT ============ -->
+  <section id="levels" class="screen modal-wrap" hidden aria-label="Select level">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2 class="modal-title">SELECT LEVEL</h2>
+        <button id="btnCloseLevels" class="btn btn-icon btn-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="levelGrid" class="level-grid"></div>
+    </div>
+  </section>
+
+  <!-- ============ GARAGE ============ -->
+  <section id="garage" class="screen modal-wrap" hidden aria-label="Garage">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2 class="modal-title">GARAGE</h2>
+        <div class="coin-pill"><span class="coin-ico"></span><b id="garageCoins">0</b></div>
+        <button id="btnCloseGarage" class="btn btn-icon btn-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="garage-body">
+        <div class="garage-preview">
+          <canvas id="garageCanvas" width="640" height="300" aria-label="Your truck"></canvas>
+          <div class="truck-stats" id="truckStats"></div>
+        </div>
+        <div class="garage-list">
+          <div id="upgradeList" class="upgrade-list"></div>
+          <h3 class="sub-title">PAINT</h3>
+          <div id="paintList" class="paint-list"></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -149,9 +238,15 @@
         <label class="setting"><span>Sound effects</span><input id="optSound" type="checkbox" class="switch"></label>
         <label class="setting"><span>Engine sound</span><input id="optEngine" type="checkbox" class="switch"></label>
         <label class="setting"><span>Vibration</span><input id="optVibrate" type="checkbox" class="switch"></label>
+        <label class="setting"><span>Gyro steering <small>(tilt phone to change lane)</small></span><input id="optGyro" type="checkbox" class="switch"></label>
+        <div class="setting"><span>Camera</span>
+          <div class="seg" role="group" aria-label="Camera">
+            <button type="button" data-cam="side">SIDE</button><button type="button" data-cam="chase">TPP</button><button type="button" data-cam="cab">FPP</button>
+          </div>
+        </div>
         <div class="setting"><span>Saved progress</span><button id="btnResetProgress" class="btn btn-small btn-danger" type="button">RESET</button></div>
       </div>
-      <p class="keys-help"><b>Keyboard:</b> → / D gas · ← / A brake · ↓ / S reverse · Space brake · E load/deliver · P pause</p>
+      <p class="keys-help"><b>Keyboard:</b> → / D gas · ← / A brake · ↓ / S reverse · Space brake · ↑ / W lane · C camera · H horn · E load/deliver · P pause</p>
       <div class="modal-buttons"><button id="btnCloseSettings" class="btn btn-green" type="button">DONE</button></div>
     </div>
   </section>
@@ -168,8 +263,11 @@
 <script src="js/cargo.js"></script>
 <script src="js/crane.js"></script>
 <script src="js/world.js"></script>
+<script src="js/traffic.js"></script>
+<script src="js/view3d.js"></script>
 <script src="js/effects.js"></script>
 <script src="js/levels.js"></script>
+<script src="js/garage.js"></script>
 <script src="js/level1.js"></script>
 <script src="js/game.js"></script>
 <script src="js/ui.js"></script>
