@@ -38,18 +38,17 @@ jobs:
 
       - name: Landscape, fullscreen, app icon
         run: |
+          set -x
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's/<activity/<activity android:screenOrientation="sensorLandscape"/' "$MANIFEST"
-          cp android-overrides/MainActivity.java android/app/src/main/java/com/cargotruck/driver/MainActivity.java
+          sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' "$MANIFEST"
+          grep -n "screenOrientation" "$MANIFEST"
+          MAIN=$(find android/app/src/main/java -name MainActivity.java | head -1)
+          echo "MainActivity: $MAIN"
+          cp android-overrides/MainActivity.java "$MAIN"
           RES=android/app/src/main/res
           rm -rf "$RES/mipmap-anydpi-v26"
-          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            name=${d%%:*}; size=${d##*:}
-            mkdir -p "$RES/mipmap-$name"
-            convert www/assets/icon-512.png -resize ${size}x${size} "$RES/mipmap-$name/ic_launcher.png"
-            cp "$RES/mipmap-$name/ic_launcher.png" "$RES/mipmap-$name/ic_launcher_round.png"
-            cp "$RES/mipmap-$name/ic_launcher.png" "$RES/mipmap-$name/ic_launcher_foreground.png"
-          done
+          cp -r android-overrides/res/. "$RES/"
+          ls "$RES"
 
       - name: Sync web files
         run: npx cap sync android
