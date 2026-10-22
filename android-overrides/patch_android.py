@@ -25,3 +25,17 @@ for src in pathlib.Path('android-overrides/res').rglob('*.png'):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, dst)
 print('icons copied')
+
+# Google Play Billing (cordova-plugin-purchase) needs compileSdk 35, and Play requires targetSdk 35 for new uploads.
+var_file = pathlib.Path('android/variables.gradle')
+if var_file.exists():
+    v = var_file.read_text()
+    v = re.sub(r'compileSdkVersion\s*=\s*\d+', 'compileSdkVersion = 35', v)
+    v = re.sub(r'targetSdkVersion\s*=\s*\d+', 'targetSdkVersion = 35', v)
+    var_file.write_text(v)
+    print('variables.gradle: compile/target SDK 35')
+props = pathlib.Path('android/gradle.properties')
+p = props.read_text() if props.exists() else ''
+if 'suppressUnsupportedCompileSdk' not in p:
+    props.write_text(p.rstrip('\n') + '\nandroid.suppressUnsupportedCompileSdk=35\n')
+    print('gradle.properties: suppressUnsupportedCompileSdk=35')

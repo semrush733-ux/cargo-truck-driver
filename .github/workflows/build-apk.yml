@@ -30,6 +30,12 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           ls "$SDK/build-tools" "$SDK/platforms"
 
+      - name: Android 35 platform (needed by Google Play Billing)
+        run: |
+          SDKM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          ls "$ANDROID_HOME/platforms" | grep -q android-35 || yes | "$SDKM" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          ls "$ANDROID_HOME/platforms"
+
       - name: Install Capacitor
         run: npm install
 
