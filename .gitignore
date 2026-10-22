@@ -1,3 +1,7 @@
 node_modules/
 android/
 *.apk
+*.jks
+*.keystore
+keystore-base64.txt
+key-info.txt

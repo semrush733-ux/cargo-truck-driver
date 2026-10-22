@@ -49,23 +49,51 @@ jobs:
       - name: Sync web files
         run: npx cap sync android
 
-      - name: Build APK
+      - name: Version number (higher every build, so phones install it as an update)
+        run: |
+          GRADLE=android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/" "$GRADLE"
+          sed -i "s/versionName \"[^\"]*\"/versionName \"1.${{ github.run_number }}\"/" "$GRADLE"
+          grep -E "versionCode|versionName" "$GRADLE"
+
+      - name: Build release APK + AAB
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../CargoTruckDriver.apk
+          ./gradlew assembleRelease bundleRelease --no-daemon
 
-      - name: Upload APK (Actions artifact)
+      - name: Sign with the release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::Repo secret KEYSTORE_BASE64 is missing (Settings > Secrets and variables > Actions)"; exit 1; fi
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks release.jks --ks-key-alias "$KEY_ALIAS" --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --out CargoTruckDriver.apk aligned.apk
+          "$BT/apksigner" verify --print-certs CargoTruckDriver.apk
+          jarsigner -keystore release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" -signedjar CargoTruckDriver.aab android/app/build/outputs/bundle/release/app-release.aab "$KEY_ALIAS"
+          rm -f release.jks aligned.apk
+
+      - name: Upload APK + AAB (Actions artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: CargoTruckDriver-apk
-          path: CargoTruckDriver.apk
+          name: CargoTruckDriver-${{ github.run_number }}
+          path: |
+            CargoTruckDriver.apk
+            CargoTruckDriver.aab
 
-      - name: Publish APK to Releases
+      - name: Publish to Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk-${{ github.run_number }}
-          name: Cargo Truck Driver build ${{ github.run_number }}
-          body: Install CargoTruckDriver.apk on your Android phone (allow "Install unknown apps").
-          files: CargoTruckDriver.apk
+          tag_name: v1.${{ github.run_number }}
+          name: Cargo Truck Driver 1.${{ github.run_number }}
+          body: |
+            CargoTruckDriver.apk: install on Android (it updates the previous version, progress is kept).
+            CargoTruckDriver.aab: upload to Google Play Console.
+          files: |
+            CargoTruckDriver.apk
+            CargoTruckDriver.aab
