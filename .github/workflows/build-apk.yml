@@ -55,7 +55,8 @@ jobs:
           chmod +x gradlew
           set -o pipefail
           ./gradlew assembleRelease bundleRelease --no-daemon 2>&1 | tee ../gradle.log || {
-            grep -E "What went wrong|error:|Could not|> |FAILED|Execution failed|Unresolved|cannot find" ../gradle.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+            MSG=$( { grep -E "^e: |error:|ERROR:" ../gradle.log | head -15; grep -A14 "What went wrong" ../gradle.log | head -30; } | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Gradle::$MSG"
             exit 1
           }
 
