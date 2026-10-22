@@ -1,0 +1,77 @@
+name: Fetch realistic 3D assets (CC0)
+
+# Downloads CC0 (public-domain) photo textures and HDRI skies from Poly Haven (https://polyhaven.com/license)
+# plus earcut (ISC) into www/assets and www/vendor, so the APK works fully offline.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fetch-assets.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Download CC0 textures + HDRIs
+        run: |
+          set -u
+          A=www/assets; mkdir -p $A/tex $A/hdri
+          BASE=https://dl.polyhaven.org/file/ph-assets
+          echo '{' > $A/manifest.json
+          FIRST=1
+          add() { if [ $FIRST = 0 ]; then echo ',' >> $A/manifest.json; fi; FIRST=0; echo "\"$1\": \"$2\"" >> $A/manifest.json; }
+          # textures: key name res
+          while read KEY NAME RES; do
+            [ -z "$KEY" ] && continue
+            ok=1
+            for MAP in diff nor_gl rough; do
+              F="$A/tex/${KEY}_${MAP}.jpg"
+              if ! curl -fsSL --retry 3 -o "$F" "$BASE/Textures/jpg/$RES/$NAME/${NAME}_${MAP}_$RES.jpg"; then rm -f "$F"; [ $MAP = diff ] && ok=0; fi
+            done
+            if [ $ok = 1 ]; then add "tex_$KEY" "$NAME"; echo "OK $KEY ($NAME)"; else echo "MISSING $KEY ($NAME)"; fi
+          done <<'LIST'
+          asphalt asphalt_02 2k
+          grass aerial_grass_rock 1k
+          rock rocky_terrain_02 1k
+          cliff rock_face 1k
+          concrete concrete_floor_02 1k
+          mud brown_mud_leaves_01 1k
+          snow snow_02 1k
+          sand aerial_beach_01 1k
+          planks wood_planks 1k
+          metal metal_plate 1k
+          bark bark_brown_02 1k
+          LIST
+          # HDRI skies: small one for lighting, bigger one for the visible sky
+          while read KEY NAME; do
+            [ -z "$KEY" ] && continue
+            if curl -fsSL --retry 3 -o "$A/hdri/${KEY}_1k.hdr" "$BASE/HDRIs/hdr/1k/$NAME/${NAME}_1k.hdr" 2>/dev/null || curl -fsSL --retry 3 -o "$A/hdri/${KEY}_1k.hdr" "$BASE/HDRIs/hdr/1k/${NAME}_1k.hdr"; then
+              curl -fsSL --retry 3 -o "$A/hdri/${KEY}_2k.hdr" "$BASE/HDRIs/hdr/2k/${NAME}_2k.hdr" || rm -f "$A/hdri/${KEY}_2k.hdr"
+              add "hdri_$KEY" "$NAME"; echo "OK hdri $KEY"
+            else rm -f "$A/hdri/${KEY}_1k.hdr"; echo "MISSING hdri $KEY ($NAME)"; fi
+          done <<'LIST'
+          day kloofendal_48d_partly_cloudy_puresky
+          clear kloppenheim_06_puresky
+          overcast kloofendal_overcast_puresky
+          LIST
+          echo '}' >> $A/manifest.json
+          cat $A/manifest.json
+          printf 'Textures and HDRIs: Poly Haven (polyhaven.com), CC0 1.0 public domain. See https://polyhaven.com/license\n' > $A/LICENSE-assets.txt
+          du -sh $A; ls -la $A/tex $A/hdri
+      - name: earcut (for extruded shapes)
+        run: |
+          cd /tmp && npm pack earcut@2.2.4 && tar xzf earcut-2.2.4.tgz && cp package/dist/earcut.min.js "$GITHUB_WORKSPACE/www/vendor/earcut.min.js" && cp package/LICENSE "$GITHUB_WORKSPACE/www/vendor/earcut-LICENSE.txt"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add www/assets www/vendor
+          git diff --cached --quiet || git commit -m "Add CC0 textures, HDRI skies and earcut [skip ci]"
+          git push
