@@ -1,0 +1,29 @@
+{
+"tex_asphalt": "asphalt_02"
+,
+"tex_grass": "aerial_grass_rock"
+,
+"tex_rock": "rocky_terrain_02"
+,
+"tex_cliff": "rock_face"
+,
+"tex_concrete": "concrete_floor_02"
+,
+"tex_mud": "brown_mud_leaves_01"
+,
+"tex_snow": "snow_02"
+,
+"tex_sand": "aerial_beach_01"
+,
+"tex_planks": "wood_planks"
+,
+"tex_metal": "metal_plate"
+,
+"tex_bark": "bark_brown_02"
+,
+"hdri_day": "kloofendal_48d_partly_cloudy_puresky"
+,
+"hdri_clear": "kloppenheim_06_puresky"
+,
+"hdri_overcast": "kloofendal_overcast_puresky"
+}
