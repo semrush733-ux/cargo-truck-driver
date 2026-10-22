@@ -5,7 +5,10 @@
  *   cargo:       { type, count } or { items: [type, type, type], count } (mixed load); kinds in cargo.js
  *   truck:       { maxSpeedCap }                      optional cap (tutorial)
  *   start:       { x }
- *   road:        { start, end, terrain: [{x,y}], curves: [{x1,x2,dir,sharp,limit}] }   y<0 is uphill
+ *   road:        { start, end, terrain: [{x,y}], curves: [{x1,x2,dir,sharp,limit}],
+ *                  sections: [{type: 'mud'|'sand'|'ice'|'rough'|'bridge'|'narrow', x1, x2}] }   y<0 is uphill
+ *   weather:     'clear' | 'rain' | 'fog'  (fixed per level)
+ *   obstacles also support { type: 'pothole', x, lane, limit }
  *   loadStation / destination                        built by CT.Levels.stations()
  *   traffic:     { density, speedMin, speedMax, exitX } density = cars kept around the truck
  *   lights:      [{ x, green, yellow, red, offset }]
@@ -72,6 +75,9 @@
     if (!cfg.implemented) return cfg;
     cfg.road.length = cfg.road.end - cfg.road.start;
     cfg.road.curves = cfg.road.curves || [];
+    cfg.road.sections = cfg.road.sections || [];
+    cfg.weather = cfg.weather || 'clear';
+    cfg.fuelRate = 62 / Math.max(4000, cfg.road.end - cfg.start.x);   // tank % per world unit at full throttle
     cfg.obstacles = cfg.obstacles || [];
     cfg.lights = cfg.lights || [];
     cfg.traffic = cfg.traffic || null;
@@ -151,9 +157,35 @@
       var bx = freeSpot(60, midFrom, midTo);
       if (bx !== null) obstacles.push({ type: 'bump', x: Math.round(bx + 30), limit: 240 * CT.K });
     }
+    // road sections: mud, sand, ice, rough surface, bridges, narrow roadworks (one lane closed)
+    var SEC = { country: ['rough', 'mud', 'bridge'], city: ['narrow', 'rough', 'bridge'], desert: ['sand', 'rough', 'sand'], snow: ['ice', 'bridge', 'ice'], night: ['narrow', 'bridge', 'rough'] }[theme];
+    var sections = [];
+    var nSec = n < 5 ? 0 : 1 + Math.floor(diff * 2.5 + rnd());
+    for (i = 0; i < nSec; i++) {
+      var type = SEC[(i + n) % SEC.length];
+      if (type === 'narrow' && !(n >= 11)) type = 'rough';
+      var slen = type === 'bridge' ? 1400 + rnd() * 900 : 1800 + rnd() * 2200;
+      var sx = freeSpot(slen, midFrom, midTo);
+      if (sx !== null) sections.push({ type: type, x1: Math.round(sx), x2: Math.round(sx + slen) });
+    }
+    sections.sort(function (a, b) { return a.x1 - b.x1; });
+    var nHoles = n < 7 ? 0 : Math.floor(diff * 4 + rnd());
+    for (i = 0; i < nHoles; i++) {
+      var hx = freeSpot(80, midFrom, midTo);
+      if (hx !== null) obstacles.push({ type: 'pothole', x: Math.round(hx + 40), lane: rnd() < 0.5 ? 0 : 1, limit: 160 * CT.K });
+    }
+    // deterministic weather per level
+    var wr = rnd(), weather = 'clear';
+    if (n >= 4) {
+      if (theme === 'city' && wr < 0.4) weather = 'rain';
+      else if (theme === 'night') weather = wr < 0.3 ? 'rain' : wr < 0.5 ? 'fog' : 'clear';
+      else if (theme === 'snow' && wr < 0.4) weather = 'fog';
+      else if (theme === 'country' && wr < 0.25) weather = 'rain';
+    }
     lights.sort(function (a, b) { return a.x - b.x; });
     curves.sort(function (a, b) { return a.x1 - b.x1; });
     obstacles.sort(function (a, b) { return a.x - b.x; });
+    var sectionTime = sections.reduce(function (t, sc) { return t + (sc.type === 'mud' || sc.type === 'sand' ? (sc.x2 - sc.x1) / (700 * CT.K) * 0.5 : sc.type === 'narrow' ? 2 : 0.5); }, 0);
 
     // ---- traffic
     var dens = { country: 0.8, city: 1.5, desert: 0.6, snow: 0.7, night: 1.3 }[theme];
@@ -167,7 +199,7 @@
 
     // ---- timing: par for the 3rd star, optional time limit
     var cruise = (380 - (theme === 'snow' ? 60 : theme === 'desert' ? 30 : 0)) * CT.K;
-    var driveTime = L / cruise + curves.length * 2.5 + lights.length * 3.5 + obstacles.length * 1.5 + (traffic ? traffic.density * 0.6 : 0);
+    var driveTime = L / cruise + curves.length * 2.5 + lights.length * 3.5 + obstacles.length * 1.5 + (traffic ? traffic.density * 0.6 : 0) + sectionTime + (weather === 'rain' ? 3 : 0);
     var par = Math.round(driveTime + 19);
     var timeLimit = n >= 8 ? Math.round(par * (n >= 30 ? 1.45 : 1.65)) : null;
 
@@ -190,7 +222,8 @@
       cargo: cargo,
       truck: {},
       start: { x: start },
-      road: { start: -760, end: Z + 690, terrain: terrain, curves: curves },
+      road: { start: -760, end: Z + 690, terrain: terrain, curves: curves, sections: sections },
+      weather: weather,
       loadStation: st.loadStation,
       destination: st.destination,
       signs: [{ x: 1500, text: 'DELIVERY HUB', sub: '→ ' + meters + ' m', color: '#1f8a43', w: 260 }],

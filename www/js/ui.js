@@ -11,7 +11,11 @@
   var garageFrom = null;
 
   var LOCK_SVG = '<svg class="lock" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>';
-  var ICONS = { engine: '⚙️', tyres: '🛞', suspension: '🔩', brakes: '🛑' };
+  var ACC_ICON = { lightbar: '💡', horns: '📯', bullbar: '🛡️', flaps: '🟫', beacon: '🚨', stripe: '🏁' };
+  var ACH_ICON = { first_delivery: '📦', first_perfect: '💎', deliveries_10: '🚚', deliveries_50: '🛣️', items_100: '💯', no_loss_10: '🔒', first_upgrade: '🔧',
+    stylist: '🎨', distance_25: '📍', distance_100: '🌍', stars_30: '⭐', chapter_1: '🌄', all_levels: '👑' };
+  var MIS_ICON = { deliver3: '🚚', perfect1: '💎', noloss2: '🔒', dist5: '🛣️', items9: '📦', stars6: '⭐', clean1: '🚦', fast1: '⏱️' };
+  function fmtNum(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   var CAM_LABEL = { side: 'SIDE', chase: 'TPP', cab: 'FPP' };
 
   function D_clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -48,7 +52,9 @@
         'winLevel', 'winStars', 'winCriteria', 'statDist', 'statTime', 'statCoins', 'bestNote', 'btnNext', 'btnWinRestart', 'btnWinGarage', 'btnWinMenu',
         'failTitle', 'failText', 'btnRetry', 'btnFailGarage', 'btnFailMenu',
         'levelGrid', 'btnCloseLevels', 'garageCoins', 'btnCloseGarage', 'garageCanvas', 'truckStats', 'upgradeList', 'paintList',
-        'optSound', 'optEngine', 'optVibrate', 'optGyro', 'btnResetProgress', 'btnCloseSettings', 'rotateHint', 'flash'
+        'optSound', 'optEngine', 'optVibrate', 'optGyro', 'btnResetProgress', 'btnCloseSettings', 'rotateHint', 'flash',
+        'optMusic', 'optGyroSens', 'gyroSensVal', 'btnMissions', 'missionBadge', 'btnAchievements', 'missions', 'achievements', 'missionList', 'missionCoins',
+        'btnCloseMissions', 'achList', 'achCount', 'btnCloseAch', 'wheelList', 'accList', 'fuelBar', 'fuelChip', 'itemPips', 'winCargo', 'winExplain', 'winBreakdown', 'splash'
       ].forEach(function (id) { el[id] = $(id); });
       el.controls = document.querySelector('.controls');
       el.cargoChip = document.querySelector('.cargo-chip');
@@ -62,6 +68,20 @@
       tap(el.btnSoundPause, function () { UI.toggleSound(); });
       tap(el.btnLevels, function () { UI.openLevels(); });
       tap(el.btnGarage, function () { UI.openGarage('menu'); });
+      tap(el.btnMissions, function () { UI.openMissions(); });
+      tap(el.btnAchievements, function () { UI.openAchievements(); });
+      tap(el.btnCloseMissions, function () { el.missions.hidden = true; UI.refreshMenu(); });
+      tap(el.btnCloseAch, function () { el.achievements.hidden = true; });
+      el.optMusic.addEventListener('change', function () { CT.Storage.setSetting('music', el.optMusic.checked); CT.Audio.music(el.optMusic.checked); });
+      el.optGyroSens.addEventListener('input', function () {
+        var v = parseInt(el.optGyroSens.value, 10);
+        CT.Storage.setSetting('gyroSens', v); el.gyroSensVal.textContent = '(tilt ' + v + '°)';
+      });
+      CT.Progress.onUnlock(function (a, got) {
+        CT.Audio.play('achieve'); CT.vibrate([30, 40, 30]);
+        UI.achToast('🏆 ' + a.name + (got ? '  +' + fmtNum(got) + ' cash' : ''));
+        UI.refreshMenu();
+      });
       tap(el.btnPause, function () { game.pause(); });
       tap(el.btnResume, function () { game.resume(); });
       tap(el.btnRestart, function () { game.restart(); });
@@ -112,7 +132,7 @@
       CT.Controls.on('camera', function () { game.cycleCamera(); });
       CT.Controls.on('horn', function () { game.horn(); });
       CT.Controls.on('pause', function () {
-        var open = ['settings', 'levels', 'garage'].filter(function (k) { return !el[k].hidden; });
+        var open = ['settings', 'levels', 'garage', 'missions', 'achievements'].filter(function (k) { return !el[k].hidden; });
         if (open.length) { if (open[0] === 'garage') UI.closeGarage(); else if (open[0] === 'settings') UI.closeSettings(); else el[open[0]].hidden = true; return; }
         if (game.state === CT.Game.STATES.PAUSED) game.resume(); else game.pause();
       });
@@ -146,7 +166,9 @@
     refreshMenu: function () {
       var next = CT.Levels.nextToPlay();
       el.playLevel.textContent = 'Level ' + next;
-      el.menuCoins.textContent = CT.Storage.getCoins();
+      el.menuCoins.textContent = fmtNum(CT.Storage.getCoins());
+      var unclaimed = CT.Progress.unclaimedCount();
+      el.missionBadge.hidden = !unclaimed; el.missionBadge.textContent = unclaimed;
       el.menuStars.textContent = CT.Storage.totalStars();
       var done = CT.Storage.completedCount();
       el.menuDone.textContent = done;
@@ -193,38 +215,97 @@
     },
     renderGarage: function () {
       var coins = CT.Storage.getCoins();
-      el.garageCoins.textContent = coins;
+      el.garageCoins.textContent = fmtNum(coins);
       var G = CT.Garage, html = '';
       Object.keys(G.UPGRADES).forEach(function (k) {
         var u = G.UPGRADES[k], lvl = CT.Storage.getUpgrade(k), cost = G.nextCost(k);
         var pips = ''; for (var i = 0; i < G.MAX_LEVEL; i++) pips += '<i class="' + (i < lvl ? 'on' : '') + '"></i>';
-        html += '<div class="upg"><div class="ico" aria-hidden="true">' + ICONS[k] + '</div><div><h4>' + u.name + ' <small>Lv ' + lvl + '/' + G.MAX_LEVEL + '</small></h4><p>' + u.desc + '</p><div class="pips">' + pips + '</div></div>' +
+        html += '<div class="upg"><div class="ico" aria-hidden="true">' + u.icon + '</div><div><h4>' + u.name + ' <small>Lv ' + lvl + '/' + G.MAX_LEVEL + '</small></h4><p>' + u.desc + '</p><div class="pips">' + pips + '</div></div>' +
           (cost === null ? '<button class="btn buy btn-ghost" disabled type="button">MAX</button>'
-            : '<button class="btn buy btn-green" type="button" data-up="' + k + '"' + (coins < cost ? ' disabled' : '') + '><span class="coin-ico"></span>' + cost + '</button>') + '</div>';
+            : '<button class="btn buy btn-green" type="button" data-up="' + k + '"' + (coins < cost ? ' disabled' : '') + '><span class="coin-ico"></span>' + fmtNum(cost) + '</button>') + '</div>';
       });
       el.upgradeList.innerHTML = html;
       Array.prototype.forEach.call(el.upgradeList.querySelectorAll('[data-up]'), function (b) {
         tap(b, function () { if (G.buy(b.getAttribute('data-up'))) { CT.Audio.play('upgrade'); CT.vibrate(30); UI.renderGarage(); } });
       });
+      function price(owned, inUse, cost, onLabel) {
+        return owned ? '<span>' + (inUse ? onLabel : 'Owned') + '</span>' : '<span class="price"><span class="coin-ico"></span>' + fmtNum(cost) + '</span>';
+      }
       var cur = CT.Storage.getPaint();
       el.paintList.innerHTML = G.PAINTS.map(function (p) {
         var owned = CT.Storage.ownsPaint(p.id);
         return '<button type="button" class="paint' + (p.id === cur ? ' sel' : '') + '" data-paint="' + p.id + '"' + (!owned && coins < p.cost ? ' disabled' : '') + '>' +
-          '<span class="sw" style="background:linear-gradient(180deg,' + p.light + ',' + p.body + ' 55%,' + p.dark + ')"></span>' + p.name +
-          (owned ? '<span>' + (p.id === cur ? 'In use' : 'Owned') + '</span>' : '<span class="price"><span class="coin-ico"></span>' + p.cost + '</span>') + '</button>';
+          '<span class="sw" style="background:linear-gradient(180deg,' + p.light + ',' + p.body + ' 55%,' + p.dark + ')"></span>' + p.name + price(owned, p.id === cur, p.cost, 'In use') + '</button>';
       }).join('');
-      Array.prototype.forEach.call(el.paintList.querySelectorAll('[data-paint]'), function (b) {
-        tap(b, function () { if (G.buyPaint(b.getAttribute('data-paint'))) { CT.Audio.play('coin'); game.applyPaint(); UI.renderGarage(); } });
-      });
+      var curW = CT.Storage.getWheel();
+      el.wheelList.innerHTML = G.WHEELS.map(function (w) {
+        var owned = CT.Storage.ownsWheel(w.id);
+        return '<button type="button" class="paint' + (w.id === curW ? ' sel' : '') + '" data-wheel="' + w.id + '"' + (!owned && coins < w.cost ? ' disabled' : '') + '>' +
+          '<span class="whl" style="background:radial-gradient(circle,' + w.hub + ' 0 22%,' + w.rim[0] + ' 23% 35%,' + w.rim[1] + ' 36% 60%,' + w.rim[2] + ' 61% 70%,#1d1d22 71%)"></span>' + w.name + price(owned, w.id === curW, w.cost, 'Fitted') + '</button>';
+      }).join('');
+      var eq = CT.Storage.getEquipped();
+      el.accList.innerHTML = G.ACCESSORIES.map(function (a) {
+        var owned = CT.Storage.ownsAccessory(a.id), on = eq.indexOf(a.id) >= 0;
+        return '<button type="button" class="paint acc' + (on ? ' on' : '') + '" data-acc="' + a.id + '" title="' + a.desc + '"' + (!owned && coins < a.cost ? ' disabled' : '') + '>' +
+          '<span class="ico" aria-hidden="true">' + (ACC_ICON[a.id] || '★') + '</span>' + a.name + (owned ? '<span>' + (on ? 'Fitted ✓' : 'Tap to fit') + '</span>' : price(false, false, a.cost)) + '</button>';
+      }).join('');
+      function bind(list, attr, fn) {
+        Array.prototype.forEach.call(list.querySelectorAll('[' + attr + ']'), function (b) {
+          tap(b, function () { if (fn(b.getAttribute(attr))) { CT.Audio.play('coin'); game.applyPaint(); UI.renderGarage(); } else CT.Audio.play('invalid'); });
+        });
+      }
+      bind(el.paintList, 'data-paint', function (id) { return G.buyPaint(id); });
+      bind(el.wheelList, 'data-wheel', function (id) { return G.buyWheel(id); });
+      bind(el.accList, 'data-acc', function (id) { return G.buyAccessory(id); });
       var cfg = G.truckConfig({ theme: 'country', truck: {} });
       var snow = G.truckConfig({ theme: 'snow', truck: {} });
       el.truckStats.innerHTML =
         '<div>Top speed<br><b>' + Math.round(G.kmh(cfg.maxSpeed)) + ' km/h</b></div>' +
         '<div>Acceleration<br><b>' + Math.round(cfg.accel / 3.3) + '</b></div>' +
+        '<div>Braking<br><b>' + Math.round(cfg.brake / 23) + '</b></div>' +
         '<div>Snow grip<br><b>' + Math.round(snow.grip * 100) + '%</b></div>' +
-        '<div>Cargo protection<br><b>' + Math.round((1 - cfg.damageMult) * 100) + '%</b></div>';
+        '<div>Cargo protection<br><b>' + Math.round((1 - cfg.damageMult) * 100) + '%</b></div>' +
+        '<div>Fuel tank<br><b>' + Math.round(cfg.fuelCapacity) + ' L</b></div>';
       this.drawGaragePreview();
     },
+
+    // ------------------------------------------------------------ missions & achievements
+    openMissions: function () {
+      var list = CT.Progress.missions();
+      el.missionCoins.textContent = fmtNum(CT.Storage.getCoins());
+      el.missionList.innerHTML = list.map(function (m) {
+        var unit = m.unit === 'm' ? function (v) { return (v / 1000).toFixed(1) + ' km'; } : function (v) { return String(Math.floor(v)); };
+        var btn = m.claimed ? '<button class="btn buy btn-ghost" type="button" disabled>CLAIMED ✓</button>'
+          : '<button class="btn buy btn-green" type="button" data-claim="' + m.id + '"' + (m.done ? '' : ' disabled') + '><span class="coin-ico"></span>' + fmtNum(m.reward) + '</button>';
+        return '<div class="task' + (m.claimed ? ' done-claimed' : '') + '"><div class="ico" aria-hidden="true">' + (MIS_ICON[m.id] || '🎯') + '</div><div><h4>' + m.name + '</h4><p>' + m.desc + '</p>' +
+          '<div class="bar"><i style="width:' + Math.round(m.progress / m.target * 100) + '%"></i></div><div class="meta">' + unit(m.progress) + ' / ' + unit(m.target) + '</div></div>' + btn + '</div>';
+      }).join('');
+      Array.prototype.forEach.call(el.missionList.querySelectorAll('[data-claim]'), function (b) {
+        tap(b, function () { var got = CT.Progress.claim(b.getAttribute('data-claim')); if (got) { CT.Audio.play('coin'); CT.vibrate(30); } UI.openMissions(); UI.refreshMenu(); });
+      });
+      el.missions.hidden = false;
+    },
+    openAchievements: function () {
+      var list = CT.Progress.achievements(), n = list.filter(function (a) { return a.unlocked; }).length;
+      el.achCount.textContent = n + '/' + list.length;
+      el.achList.innerHTML = list.map(function (a) {
+        var unit = a.unit === 'm' ? function (v) { return (v / 1000).toFixed(1) + ' km'; } : function (v) { return String(Math.floor(v)); };
+        var when = a.unlocked ? 'Unlocked ' + new Date(a.at).toLocaleDateString() : unit(a.value) + ' / ' + unit(a.target);
+        return '<div class="task ' + (a.unlocked ? 'unlocked' : 'locked') + '"><div class="ico" aria-hidden="true">' + (a.unlocked ? (ACH_ICON[a.id] || '🏆') : '🔒') + '</div><div><h4>' + a.name + '</h4><p>' + a.desc + '</p>' +
+          (a.unlocked ? '' : '<div class="bar"><i style="width:' + Math.round(a.value / a.target * 100) + '%"></i></div>') + '<div class="meta">' + when + '</div></div>' +
+          '<div class="reward"><span class="coin-ico"></span>' + fmtNum(a.reward) + '</div></div>';
+      }).join('');
+      el.achievements.hidden = false;
+    },
+    achToast: function (msg) {
+      var d = document.createElement('div');
+      d.className = 'ach-toast'; d.textContent = msg;
+      document.getElementById('app').appendChild(d);
+      setTimeout(function () { d.classList.add('out'); }, 2600);
+      setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, 3200);
+    },
+    hideSplash: function () { if (el.splash) { el.splash.classList.add('done'); setTimeout(function () { el.splash.hidden = true; }, 500); } },
+
     drawGaragePreview: function () {
       var c = el.garageCanvas, ctx = c.getContext('2d');
       game.applyPaint();
@@ -238,7 +319,7 @@
 
     // ------------------------------------------------------------ screens
     showMenu: function () {
-      ['hud', 'pause', 'win', 'fail', 'levels', 'garage'].forEach(function (k) { el[k].hidden = true; });
+      ['hud', 'pause', 'win', 'fail', 'levels', 'garage', 'missions', 'achievements'].forEach(function (k) { el[k].hidden = true; });
       el.menu.hidden = false; el.lockNote.hidden = true;
       this.refreshMenu();
       setTimeout(function () { try { el.btnPlay.focus({ preventScroll: true }); } catch (e) {} }, 50);
@@ -246,7 +327,7 @@
 
     enterLevel: function (L, g) {
       last = {};
-      ['menu', 'pause', 'win', 'fail', 'levels', 'garage'].forEach(function (k) { el[k].hidden = true; });
+      ['menu', 'pause', 'win', 'fail', 'levels', 'garage', 'missions', 'achievements'].forEach(function (k) { el[k].hidden = true; });
       el.hud.hidden = false;
       el.levelChipNum.textContent = L.id;
       el.levelChipName.textContent = L.name;
@@ -277,7 +358,8 @@
       var b = el.btnAction, mode, text, icon, hint = '', disabled = false;
       switch (s) {
         case ST.LOADING:
-          mode = 'hidden';                                   // workers load by themselves; the timer is in the banner
+          if (!g.loadCrew.started && g.cargo.loadedCount() < g.cargo.required) { mode = 'load'; text = 'LOAD'; icon = 'load'; hint = 'Workers load it for you'; }
+          else mode = 'hidden';
           break;
         case ST.READY_TO_DRIVE: case ST.DRIVING:
           var nearZone = g.level && (g.level.tutorial || (g.level.destination.zone.x1 - (g.truck.x + CT.Truck.FRONT)) < 1800 * CT.K);
@@ -288,10 +370,13 @@
           mode = 'hidden'; break;
         default: mode = 'hidden';
       }
+      if (g.recoverable && (s === ST.DRIVING || s === ST.READY_TO_DRIVE || s === ST.ARRIVED)) { mode = 'recover'; text = 'RECOVER'; icon = 'load'; hint = 'Put the cargo back'; disabled = false; }
       b.hidden = mode === 'hidden';
       el.actionHint.textContent = mode === 'hidden' ? '' : hint;
       if (mode !== 'hidden') {
         b.classList.toggle('deliver', mode === 'deliver');
+        b.classList.toggle('recover', mode === 'recover');
+        b.classList.toggle('load', mode === 'load');
         b.classList.toggle('glow', !disabled);
         b.disabled = disabled;
         el.actionText.textContent = text;
@@ -353,6 +438,23 @@
       var m = Math.max(0, Math.round(Math.abs(zc - tr.x) * CT.Levels.METERS_PER_UNIT));
       setText(el.distLeft, 'dist', g.zone.inside ? 'Arrived' : m >= 1000 ? (m / 1000).toFixed(2) + ' km' : m + ' m');
       setText(el.speedVal, 'spd', String(Math.round(Math.abs(CT.Garage.kmh(tr.v)))));
+      if (g.fuelMax) {
+        var ff = Math.max(0, g.fuel / g.fuelMax), fw = Math.round(ff * 100) + '%';
+        if (last.fuel !== fw) {
+          last.fuel = fw; el.fuelBar.style.width = fw;
+          el.fuelBar.style.background = ff > 0.4 ? '#ffc21a' : ff > 0.2 ? '#ff8a1f' : '#ff4b3e';
+          el.fuelChip.classList.toggle('low', ff < 0.2);
+        }
+      }
+      var ST2 = CT.CargoManager.STATE, pips = g.cargo.items.map(function (it) {
+        if (it.lost || it.destroyed || it.state === ST2.FALLEN) return 'lost';
+        if (it.state === ST2.DOCK || it.state === ST2.CARRY) return 'dock';
+        return it.health > 70 ? 'ok' : it.health > 35 ? 'mid' : 'low';
+      }).join(',');
+      if (last.pips !== pips) {
+        last.pips = pips;
+        el.itemPips.innerHTML = pips.split(',').map(function (c) { return c === 'dock' ? '<i style="opacity:.35"></i>' : '<i class="' + c + '"></i>'; }).join('');
+      }
       var cabView = g.use3D() && g.camMode === 'cab';
       if (last.cab !== cabView) { last.cab = cabView; el.hud.classList.toggle('cab', cabView); }
       var near = (L.destination.zone.x1 - (tr.x + CT.Truck.FRONT)) < 1800 * CT.K;
@@ -379,7 +481,12 @@
       el.winLevel.textContent = 'Level ' + r.levelId + ' · ' + r.levelName;
       el.statDist.textContent = r.distance >= 1000 ? (r.distance / 1000).toFixed(2) + ' km' : Math.round(r.distance) + ' m';
       el.statTime.textContent = fmtTime(r.time);
-      el.statCoins.textContent = '+' + r.coins;
+      el.statCoins.textContent = '+' + fmtNum(r.coins);
+      el.winCargo.innerHTML = '<span>Loaded <b>' + r.loaded + '</b></span><span>Delivered <b>' + r.delivered + '/' + r.required + '</b></span>' +
+        '<span>Lost <b>' + r.lost + '</b></span><span>Condition <b>' + r.condition + '%</b></span><span>Fuel left <b>' + r.fuelLeft + '%</b></span>';
+      el.winExplain.textContent = r.explain || '';
+      el.winBreakdown.innerHTML = (r.breakdown || []).map(function (l) { return '<li><span>' + l.label + '</span><b>+' + fmtNum(l.amount) + '</b></li>'; }).join('') +
+        '<li class="total"><span>Total cash</span><b>+' + fmtNum(r.coins) + '</b></li>';
       el.bestNote.textContent = r.isBest ? 'New best time!' : '';
       el.winStars.innerHTML = bigStar(false) + bigStar(true) + bigStar(false);
       el.winCriteria.innerHTML = r.criteria.map(function (c, i) {
@@ -414,6 +521,9 @@
       el.optEngine.checked = CT.Storage.getSetting('engine') !== false;
       el.optVibrate.checked = CT.Storage.getSetting('vibrate') !== false;
       el.optGyro.checked = CT.Storage.getSetting('gyro') === true;
+      el.optMusic.checked = CT.Storage.getSetting('music') === true;
+      var gs = CT.Storage.getSetting('gyroSens') || 15;
+      el.optGyroSens.value = gs; el.gyroSensVal.textContent = '(tilt ' + gs + '°)';
       this.syncCamButtons();
       el.btnResetProgress.textContent = 'RESET'; resetArmed = 0;
       el.settings.hidden = false;

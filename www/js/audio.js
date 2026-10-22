@@ -1,7 +1,30 @@
 /* audio.js — all sounds are synthesised with WebAudio (no audio files needed, works offline). */
 (function (CT) {
   'use strict';
-  var ctx = null, master = null, sfxBus = null, engineBus = null;
+  var ctx = null, master = null, sfxBus = null, engineBus = null, musicBus = null;
+  var musicTimer = null, musicStep = 0, musicNext = 0;
+  // calm 4-chord loop (C – Am – F – G), original
+  var CHORDS = [[261.6, 329.6, 392.0], [220.0, 261.6, 329.6], [174.6, 220.0, 261.6], [196.0, 246.9, 293.7]];
+  var BASS = [130.8, 110.0, 87.3, 98.0];
+  function musicTick() {
+    if (!ctx || !musicBus) return;
+    var beat = 60 / 96, now = ctx.currentTime;
+    if (musicNext < now) musicNext = now + 0.05;
+    while (musicNext < now + 0.4) {
+      var bar = Math.floor(musicStep / 8) % 4, st = musicStep % 8, t = musicNext;
+      if (st === 0) CHORDS[bar].forEach(function (f) { mtone('triangle', f, t, beat * 7.5, 0.035); });
+      if (st % 2 === 0) mtone('sine', BASS[bar] * (st === 4 ? 1.5 : 1), t, beat * 0.9, 0.09);
+      var arp = CHORDS[bar][(st * 2) % 3] * 2;
+      if (st % 2 === 1) mtone('square', arp, t, beat * 0.35, 0.012);
+      musicStep++; musicNext += beat / 2;
+    }
+  }
+  function mtone(type, f, t0, dur, vol) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(musicBus); o.start(t0); o.stop(t0 + dur + 0.05);
+  }
   var engine = null;
   var noiseBuf = null;
 
@@ -15,6 +38,7 @@
       ctx = new AC();
       master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination);
       sfxBus = ctx.createGain(); sfxBus.gain.value = settingOn('sound') ? 1 : 0; sfxBus.connect(master);
+      musicBus = ctx.createGain(); musicBus.gain.value = 0; musicBus.connect(master);
       engineBus = ctx.createGain(); engineBus.gain.value = 0; engineBus.connect(master);
       var len = ctx.sampleRate * 1;
       noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -70,6 +94,11 @@
     squeal: function (t) { noise(t, 0.45, 0.18, 2600, 9, 'bandpass'); tone('sawtooth', 1300, 1100, t, 0.4, 0.03); },
     fail: function (t) { [523, 440, 349, 262].forEach(function (f, i) { tone('triangle', f, f * 0.97, t + i * 0.18, 0.3, 0.2); }); },
     coin: function (t) { tone('square', 988, 988, t, 0.06, 0.1); tone('square', 1319, 1319, t + 0.06, 0.18, 0.1); },
+    reverse: function (t) { tone('square', 1250, 1250, t, 0.16, 0.08); },
+    lowfuel: function (t) { tone('triangle', 440, 440, t, 0.15, 0.18); tone('triangle', 440, 440, t + 0.22, 0.15, 0.18); },
+    invalid: function (t) { tone('square', 220, 160, t, 0.18, 0.12); },
+    achieve: function (t) { [659, 880, 1047, 1319].forEach(function (f, i) { tone('triangle', f, f, t + i * 0.08, 0.22, 0.2); }); },
+    pickup: function (t) { tone('triangle', 330, 660, t, 0.25, 0.2); },
     upgrade: function (t) { [392, 523, 659, 784, 1047].forEach(function (f, i) { tone('triangle', f, f, t + i * 0.06, 0.16, 0.2); }); }
   };
 
@@ -82,8 +111,16 @@
       if (!ctx || !settingOn('sound') || ctx.state !== 'running') return;
       var fn = SFX[name]; if (fn) { try { fn(ctx.currentTime + 0.005); } catch (e) {} }
     },
+    music: function (on) {
+      if (!ensure()) return;
+      var want = on && settingOn('music');
+      musicBus.gain.setTargetAtTime(want ? 0.55 : 0, ctx.currentTime, 0.4);
+      if (want && !musicTimer) { musicNext = ctx.currentTime + 0.1; musicTimer = setInterval(musicTick, 120); }
+      if (!want && musicTimer) { var tm = musicTimer; musicTimer = null; setTimeout(function () { if (!musicTimer) clearInterval(tm); }, 600); }
+    },
     applySettings: function () {
       if (!ctx) return;
+      if (!settingOn('music') && musicTimer) this.music(false);
       sfxBus.gain.setTargetAtTime(settingOn('sound') ? 1 : 0, ctx.currentTime, 0.02);
       if (!settingOn('sound') || !settingOn('engine')) this.engineOff();
     },

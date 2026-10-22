@@ -73,6 +73,10 @@
           sprites.push({ z: pr.x + 157, lat: ROAD_HALF + 170 + hash(pr.x + 3) * 560, k: pr.kind, p: pr });
       }
     });
+    (L.road.sections || []).forEach(function (sc) {
+      if (sc.type !== 'narrow' || sc.x2 < zMin || sc.x1 > zMax) return;
+      for (var cz = Math.max(sc.x1, Math.ceil(zMin / 220) * 220); cz < Math.min(sc.x2, zMax); cz += 220) sprites.push({ z: cz, lat: -LANE, k: 'cone' });
+    });
     if (g.traffic) g.traffic.cars.forEach(function (c) {
       var z = c.x - c.len / 2;
       if (z > zMin && z < zMax) { var e = c.laneT * c.laneT * (3 - 2 * c.laneT); sprites.push({ z: z, lat: mix(LANE, -LANE, e), k: 'car', c: c }); }
@@ -87,9 +91,11 @@
       var a = pts[j], b = pts[j + 1];
       if (a.d > 1 && b.d > 1) {
         var alt = Math.floor(a.z / SEG) % 2 === 0;
-        var fog = Math.pow(Math.min(1, a.d / (N * SEG)), 1.7);
-        // ground
-        ctx.fillStyle = th.grass[0];
+        var fogged = L.weather === 'fog';
+        var fog = Math.pow(Math.min(1, a.d / (N * SEG * (fogged ? 0.45 : 1))), fogged ? 1.1 : 1.7);
+        var sec = world.sectionAt(a.z);
+        // ground (water under bridges)
+        ctx.fillStyle = sec && sec.type === 'bridge' ? (alt ? '#3d8fd0' : '#357fc0') : th.grass[0];
         ctx.fillRect(0, b.sy, W, a.sy - b.sy + 1);
         if (!alt) { ctx.fillStyle = 'rgba(0,0,0,.05)'; ctx.fillRect(0, b.sy, W, a.sy - b.sy + 1); }
         // rumble strips + road + markings
@@ -99,6 +105,30 @@
         this.quad(ctx, a, b, ROAD_HALF - 18, ROAD_HALF - 10, '#ffd34a');
         if (alt) this.quad(ctx, a, b, -4, 4, '#f2f2f2');
         if (a.z >= zone.x1 && a.z < zone.x2) this.quad(ctx, a, b, -ROAD_HALF, ROAD_HALF, g.zone.ready ? 'rgba(80,230,100,.6)' : 'rgba(60,210,90,.38)');
+        if (sec) {
+          var st = sec.type;
+          if (st === 'mud') this.quad(ctx, a, b, -ROAD_HALF, ROAD_HALF, alt ? 'rgba(110,72,36,.85)' : 'rgba(95,62,30,.85)');
+          else if (st === 'sand') this.quad(ctx, a, b, -ROAD_HALF, ROAD_HALF, alt ? 'rgba(226,190,120,.85)' : 'rgba(214,176,104,.85)');
+          else if (st === 'ice') this.quad(ctx, a, b, -ROAD_HALF, ROAD_HALF, alt ? 'rgba(210,236,255,.7)' : 'rgba(190,226,252,.6)');
+          else if (st === 'rough' && Math.floor(a.z / SEG) % 3 === 1) this.quad(ctx, a, b, -ROAD_HALF * 0.6, ROAD_HALF * 0.2, 'rgba(30,26,22,.35)');
+          else if (st === 'narrow') this.quad(ctx, a, b, -ROAD_HALF, -4, 'rgba(255,138,31,.25)');
+          else if (st === 'bridge') {
+            [-1, 1].forEach(function (sd) {
+              var px = a.sx + sd * ROAD_HALF * 1.18 * a.s, pw = Math.max(1.5, 8 * a.s), ph = 60 * a.s;
+              ctx.fillStyle = '#c9d4e2'; ctx.fillRect(px - pw / 2, a.sy - ph, pw, ph);
+              ctx.fillStyle = '#9aa3b2';
+              ctx.beginPath(); ctx.moveTo(a.sx + sd * ROAD_HALF * 1.18 * a.s, a.sy - ph); ctx.lineTo(b.sx + sd * ROAD_HALF * 1.18 * b.s, b.sy - 60 * b.s);
+              ctx.lineTo(b.sx + sd * ROAD_HALF * 1.18 * b.s, b.sy - 52 * b.s); ctx.lineTo(a.sx + sd * ROAD_HALF * 1.18 * a.s, a.sy - ph + 8 * a.s); ctx.closePath(); ctx.fill();
+            });
+          }
+        }
+        (L.obstacles || []).forEach(function (o) {
+          if (o.type === 'pothole' && o.x >= a.z && o.x < a.z + SEG) {
+            var lat = o.lane ? -LANE : LANE, t = (o.x - a.z) / SEG, p = lerpPt(a, b, t);
+            ctx.fillStyle = '#231f1b'; ctx.beginPath(); ctx.ellipse(p.sx + lat * p.s, p.sy, 40 * p.s, 9 * p.s, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(80,110,140,.5)'; ctx.beginPath(); ctx.ellipse(p.sx + lat * p.s + 3 * p.s, p.sy + 2 * p.s, 24 * p.s, 5 * p.s, 0, 0, Math.PI * 2); ctx.fill();
+          }
+        });
         var lb = L.loadStation.bay;
         if (a.z >= lb.x1 && a.z < lb.x2) this.quad(ctx, a, b, -ROAD_HALF, ROAD_HALF, 'rgba(255,211,74,.25)');
         (L.lights || []).forEach(function (l) {
@@ -125,7 +155,7 @@
           var bd = st.building;
           if (a.z >= bd.x1 && a.z < bd.x2) this.wall(ctx, a, b, -ROAD_HALF - 130, bd.height + 20, bd, night, alt);
         }, this);
-        if (fog > 0.02) { ctx.fillStyle = th.fog; ctx.globalAlpha = fog * 0.85; ctx.fillRect(0, b.sy - 2, W, a.sy - b.sy + 3); ctx.globalAlpha = 1; }
+        if (fog > 0.02) { ctx.fillStyle = fogged ? '#dfe6ee' : th.fog; ctx.globalAlpha = fog * 0.85; ctx.fillRect(0, b.sy - 2, W, a.sy - b.sy + 3); ctx.globalAlpha = 1; }
       }
       while (si < sprites.length && sprites[si].z >= a.z) {
         this.sprite(ctx, sprites[si], pts, camZ, camLat, camY, F, hz, W, g, night, Math.pow(Math.min(1, (sprites[si].z - camZ) / (N * SEG)), 1.7));
@@ -251,6 +281,11 @@
         break;
       case 'truck': drawTruckBack(ctx, x, y + g.truck.bounce * s, 112 * s, g, night); break;
       case 'lamp': spriteLamp(ctx, x, y, s, night); break;
+      case 'cone':
+        ctx.fillStyle = '#ff6a1f'; ctx.beginPath(); ctx.moveTo(x - 16 * s, y); ctx.lineTo(x, y - 46 * s); ctx.lineTo(x + 16 * s, y); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillRect(x - 8 * s, y - 28 * s, 16 * s, 7 * s);
+        ctx.fillStyle = '#2b2f38'; ctx.fillRect(x - 20 * s, y - 4 * s, 40 * s, 5 * s);
+        break;
       case 'sign': spriteSign(ctx, x, y, s, sp.p); break;
       case 'signal': spriteSignal(ctx, x, y, s, sp.p.light, g.lt); break;
       default: spriteTree(ctx, x, y, s * (sp.p.s || 1), sp.k, g.world.theme); break;
@@ -311,7 +346,7 @@
     ctx.fillStyle = '#9aa3b2'; ctx.fillRect(x - 4 * s, y - 170 * s, 8 * s, 170 * s);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     var lw = Math.max(1, 3 * s);
-    if (p.style === 'curve' || p.style === 'bump' || p.style === 'warning') {
+    if (p.style === 'curve' || p.style === 'bump' || p.style === 'warning' || p.style === 'section' || p.style === 'pothole') {
       ctx.save(); ctx.translate(x, y - 200 * s); ctx.rotate(Math.PI / 4);
       D.box(ctx, -40 * s, -40 * s, 80 * s, 80 * s, 6 * s, '#ffc21a', INK, lw); ctx.restore();
       ctx.fillStyle = INK; ctx.strokeStyle = INK; ctx.lineWidth = 6 * s; ctx.lineCap = 'round';

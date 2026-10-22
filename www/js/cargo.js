@@ -4,18 +4,19 @@
   var D = CT.Draw, INK = D.INK;
   var BOX_W = 320, BOX_H = 250;   // art units: every load fits this footprint on the bed
 
-  var STATE = { DOCK: 'dock', CARRY: 'carry', TRUCK: 'truck', STORED: 'stored' };
+  var STATE = { DOCK: 'dock', CARRY: 'carry', TRUCK: 'truck', STORED: 'stored', FALLEN: 'fallen' };
 
   var TYPES = {
-    box:    { label: 'Boxes',          weight: 1, fragile: false },
-    sacks:  { label: 'Rice sacks',     weight: 2, fragile: false },
-    fruit:  { label: 'Fruit crates',   weight: 1, fragile: true },
-    crate:  { label: 'Wooden crates',  weight: 2, fragile: false },
-    barrel: { label: 'Oil drums',      weight: 2, fragile: false },
-    gas:    { label: 'Gas cylinders',  weight: 2, fragile: true },
-    glass:  { label: 'Glass panels',   weight: 1, fragile: true },
-    fridge: { label: 'Fridges',        weight: 2, fragile: true },
-    steel:  { label: 'Steel beams',    weight: 3, fragile: false }
+    // weight: slows acceleration and braking · sens: damage sensitivity (1 = normal)
+    box:    { label: 'Boxes',          one: 'Box',          weight: 1, sens: 1.0, fragile: false },
+    sacks:  { label: 'Rice sacks',     one: 'Rice sacks',   weight: 2, sens: 0.6, fragile: false },
+    fruit:  { label: 'Fruit crates',   one: 'Fruit crate',  weight: 1, sens: 1.5, fragile: true },
+    crate:  { label: 'Wooden crates',  one: 'Wooden crate', weight: 2, sens: 0.8, fragile: false },
+    barrel: { label: 'Oil drums',      one: 'Oil drums',    weight: 2, sens: 0.9, fragile: false },
+    gas:    { label: 'Gas cylinders',  one: 'Gas cylinders',weight: 2, sens: 1.4, fragile: true },
+    glass:  { label: 'Glass panels',   one: 'Glass panels', weight: 1, sens: 2.2, fragile: true },
+    fridge: { label: 'Fridges',        one: 'Fridge',       weight: 2, sens: 1.6, fragile: true },
+    steel:  { label: 'Steel beams',    one: 'Steel beams',  weight: 3, sens: 0.4, fragile: false }
   };
 
   // ------------------------------------------------------------------ artwork (bottom-centre at cx, by)
@@ -170,6 +171,24 @@
     (ART[opts.type] || artBox)(ctx, cx, by, opts.variant || 0);
   }
 
+  /** Cracks and dents once an item is damaged; a big red X when destroyed. */
+  function drawDamage(ctx, health) {
+    if (health > 70) return;
+    var k = 1 - health / 70;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(40,20,10,' + (0.35 + 0.5 * k) + ')'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-90, -200); ctx.lineTo(-60, -150); ctx.lineTo(-80, -110); ctx.lineTo(-40, -70);
+    if (k > 0.4) { ctx.moveTo(70, -230); ctx.lineTo(40, -180); ctx.lineTo(70, -140); ctx.moveTo(10, -60); ctx.lineTo(40, -30); }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(60,40,20,' + 0.25 * k + ')'; ctx.fillRect(-160, -250, 320, 250);
+    if (health <= 0) {
+      ctx.strokeStyle = '#e2382f'; ctx.lineWidth = 22;
+      ctx.beginPath(); ctx.moveTo(-90, -200); ctx.lineTo(90, -40); ctx.moveTo(90, -200); ctx.lineTo(-90, -40); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawStrap(ctx, cx, progress) {
     if (progress <= 0) return;
     var top = CT.Truck.BED_TOP - BOX_H - 6, bottom = 558;
@@ -193,6 +212,13 @@
     this.type = type;
     this.weight = T.weight;
     this.fragile = T.fragile;
+    this.sens = T.sens;
+    this.name = T.one;
+    this.health = 100;          // condition of this item, 0..100
+    this.lost = false;          // fell off the truck (can be recovered unless destroyed)
+    this.destroyed = false;     // broken beyond saving
+    this.hop = 0; this.hopV = 0; this.tilt = 0;
+    this.fall = null;
     this.variant = id;
     this.state = STATE.DOCK;
     this.slot = -1;
@@ -253,14 +279,16 @@
   CargoManager.prototype.onTruckCount = function () { return this.items.filter(function (i) { return i.state === STATE.TRUCK; }).length; };
   CargoManager.prototype.weightOnTruck = function () { return this.items.reduce(function (s, i) { return s + (i.state === STATE.TRUCK ? i.weight : 0); }, 0); };
   CargoManager.prototype.allStrapped = function () {
+    if (this.items.some(function (i) { return i.state === STATE.TRUCK && i.hop < -1; })) return false;
     return this.items.every(function (i) { return i.state !== STATE.TRUCK || (i.strap >= 1 && Math.abs(i.lift) < 1); });
   };
 
-  CargoManager.prototype.update = function (dt, truckAccel) {
-    var K = CT.K || 1;
-    var limit = this.secured ? 7 : 40;
+  CargoManager.prototype.update = function (dt, truckAccel, heightAt) {
+    var K = CT.K || 1, stab = this.stability || 0;
+    var limit = (this.secured ? 11 : 40) - stab * 1.2;
     var a = truckAccel / K;
-    var inertia = Math.abs(a) > 420 ? -a * 0.01 : 0;
+    var inertia = Math.abs(a) > 300 ? -a * 0.014 * (1 - stab * 0.12) : 0;
+    var self = this;
     this.items.forEach(function (it) {
       if (it.state === STATE.TRUCK && it.lift < 0) it.lift = Math.min(0, it.lift + dt * 900);     // settle into the bed
       if (it.strap < it.strapTarget && it.lift >= -1) it.strap = Math.min(it.strapTarget, it.strap + dt * 2.6);
@@ -272,9 +300,78 @@
         it.dx += it.dvx * dt;
         if (it.dx > limit) { it.dx = limit; it.dvx *= -0.3; }
         if (it.dx < -limit) { it.dx = -limit; it.dvx *= -0.3; }
+        it.hopV += (-it.hop * 260 - it.hopV * 12) * dt;
+        it.hop += it.hopV * dt;
+        if (it.hop > 0) { it.hop = 0; it.hopV = -it.hopV * 0.3; }
+        it.tilt = D.clamp(it.dx / limit * 0.05 + it.dvx * 0.0008, -0.08, 0.08);
       }
+      if (it.state === STATE.FALLEN && it.fall) self.updateFall(it, dt, heightAt);
     });
   };
+
+  // ---- cargo falling off the truck
+  CargoManager.prototype.knockOff = function (it, truck, dir) {
+    var p = truck.slotWorld(it.slot);
+    it.state = STATE.FALLEN; it.slot = -1; it.lost = true; it.strap = 0; it.strapTarget = 0;
+    it.x = p.x; it.y = p.y - 10; it.rot = 0;
+    it.fall = { vx: truck.v * 0.55 + dir * 120, vy: -420, vr: dir * 3.5, rest: false };
+    it.dx = 0; it.dvx = 0; it.hop = 0; it.hopV = 0; it.tilt = 0;
+  };
+  CargoManager.prototype.updateFall = function (it, dt, heightAt) {
+    var f = it.fall; if (f.rest) return;
+    var ground = (heightAt ? heightAt(it.x) : 0) + 34;   // lands on the near edge of the road
+    f.vy += 1800 * dt;
+    it.x += f.vx * dt; it.y += f.vy * dt; it.rot += f.vr * dt;
+    if (it.y >= ground) {
+      it.y = ground;
+      if (Math.abs(f.vy) > 220) {
+        var hit = Math.min(40, Math.abs(f.vy) * 0.03) * it.sens;
+        it.health = Math.max(0, it.health - hit);
+        if (it.health <= 0) it.destroyed = true;
+        if (this.onImpact) this.onImpact(it, hit);
+      }
+      f.vy *= -0.32; f.vx *= 0.55; f.vr *= 0.5;
+      if (Math.abs(f.vy) < 90) {
+        f.vy = 0; f.vx *= 0.8;
+        if (Math.abs(f.vx) < 20) { f.rest = true; it.rot = Math.round(it.rot / (Math.PI / 2)) * (Math.PI / 2) * 0 + (it.rot % 0.3); }
+      }
+    }
+  };
+  /** Puts a recovered item back on the bed in a free slot. */
+  CargoManager.prototype.recover = function (it) {
+    var used = {};
+    this.items.forEach(function (o) { if (o.state === STATE.TRUCK) used[o.slot] = true; });
+    var slot = -1;
+    for (var s = 0; s < CT.Truck.SLOTS.length; s++) if (!used[s]) { slot = s; break; }
+    if (slot < 0) return -1;
+    it.lost = false; it.fall = null;
+    it.state = STATE.TRUCK; it.slot = slot; it.rot = 0; it.dx = 0; it.dvx = 0;
+    it.lift = -286; it.strap = 0; it.strapTarget = 1;
+    return slot;
+  };
+
+  /** Spreads a hit over the cargo on the bed, scaled by each item's sensitivity. Returns the worst-hit item. */
+  CargoManager.prototype.damageItems = function (amount, mult) {
+    var worst = null, worstD = 0;
+    this.items.forEach(function (it) {
+      if (it.state !== STATE.TRUCK) return;
+      var d = amount * it.sens * mult * (0.7 + 0.6 * Math.abs(Math.sin(it.id * 12.9 + amount)));
+      it.health = Math.max(0, it.health - d);
+      if (d > worstD) { worstD = d; worst = it; }
+    });
+    return worst ? { item: worst, amount: worstD } : null;
+  };
+  CargoManager.prototype.bounce = function (amount) {
+    this.items.forEach(function (it) { if (it.state === STATE.TRUCK) it.hopV -= amount * (0.7 + 0.3 * Math.sin(it.id * 5.3)); });
+  };
+  /** Average condition of the cargo still in play (lost items count as 0). */
+  CargoManager.prototype.condition = function () {
+    var n = this.items.length; if (!n) return 100;
+    return this.items.reduce(function (s, it) { return s + (it.lost || it.destroyed ? 0 : it.health); }, 0) / n;
+  };
+  CargoManager.prototype.lostCount = function () { return this.items.filter(function (it) { return it.lost || it.destroyed; }).length; };
+  CargoManager.prototype.destroyedCount = function () { return this.items.filter(function (it) { return it.destroyed; }).length; };
+  CargoManager.prototype.fallenRecoverable = function () { return this.items.filter(function (it) { return it.state === STATE.FALLEN && !it.destroyed; }); };
 
   CargoManager.prototype.jolt = function (strength, dir) {
     this.items.forEach(function (it) {
@@ -288,9 +385,11 @@
       var cx = CT.Truck.SLOTS[it.slot] + it.dx;
       var sq = it.pop > 0 ? Math.sin(it.pop * Math.PI) * 0.06 : 0;
       ctx.save();
-      ctx.translate(cx, CT.Truck.BED_TOP + it.lift);
+      ctx.translate(cx, CT.Truck.BED_TOP + it.lift + it.hop);
+      ctx.rotate(it.tilt);
       ctx.scale(1 + sq, 1 - sq);
       drawCargo(ctx, 0, 0, { type: it.type, variant: it.variant });
+      drawDamage(ctx, it.health);
       ctx.restore();
     });
   };
@@ -314,6 +413,7 @@
       ctx.rotate(it.rot);
       ctx.scale(S * (1 + sq), S * (1 - sq));
       drawCargo(ctx, 0, 0, { type: it.type, variant: it.variant });
+      drawDamage(ctx, it.destroyed ? 0 : it.health);
       ctx.restore();
     });
   };

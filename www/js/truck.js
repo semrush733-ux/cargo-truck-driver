@@ -65,8 +65,10 @@
    */
   Truck.prototype.update = function (dt, input, terrain, drive) {
     var c = this.cfg;
-    var wantGas = drive && input.gas && !input.brake;
-    var wantRev = drive && input.reverse && !input.brake && !input.gas;
+    var engineOn = !this.noFuel;
+    var wantGas = drive && engineOn && input.gas && !input.brake;
+    var wantRev = drive && engineOn && input.reverse && !input.brake && !input.gas;
+    var surf = this.surface || null;
     var wantBrake = drive ? input.brake : true;
     var k = Math.min(1, dt * 7);
     this.throttle += ((wantGas ? 1 : 0) - this.throttle) * k;
@@ -76,8 +78,9 @@
     var mass = 1 + this.cargoWeight * c.weightFactor;
     var v0 = this.v, v = this.v, a = 0, decel = 0;
 
-    var grip = c.grip || 1;
-    if (wantBrake) decel += c.brake * (0.35 + 0.65 * grip);
+    var grip = (c.grip || 1) * (surf ? surf.grip : 1);
+    var heavy = 1 + this.cargoWeight * 0.035;          // heavier load = longer stopping distance
+    if (wantBrake) decel += c.brake * (0.35 + 0.65 * grip) / heavy;
     if (this.throttle > 0.01) {
       if (v < -5) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
       else a += (c.accel / mass) * (0.55 + 0.45 * grip) * this.throttle * Math.max(0, 1 - Math.pow(Math.max(0, v) / c.maxSpeed, 2));
@@ -87,6 +90,10 @@
       else a -= (c.reverseAccel / mass) * this.revThrottle * Math.max(0, 1 - Math.pow(Math.max(0, -v) / c.reverseMax, 2));
     }
     decel += c.rolling + Math.abs(v) * c.drag;
+    if (surf) {
+      decel += c.rolling * (surf.drag || 0);
+      if (surf.cap && Math.abs(v) > surf.cap) decel += (Math.abs(v) - surf.cap) * 2.2;   // mud / sand holds the truck back
+    }
     a += c.gravity * Math.sin(this.slope);          // uphill (slope < 0) slows the truck
 
     v += a * dt;
@@ -158,6 +165,9 @@
   // ------------------------------------------------------------------ drawing
   var OR = '#f8a619', OR_LT = '#ffc23d', OR_DK = '#d9820b', OR_LINE = '#c47208', LIP = '#ffd25e';
   var TIME = 0;
+  var RIM = ['#ffffff', '#d3d6dc', '#a3a8b2'], HUB = '#555c69', ACC = [];
+  Truck.setCosmetics = function (c) { if (c.wheel) { RIM = c.wheel.rim; HUB = c.wheel.hub; } ACC = c.acc || []; };
+  Truck.accessories = function () { return ACC; };
   Truck.setPaint = function (p) { OR = p.body; OR_LT = p.light; OR_DK = p.dark; OR_LINE = p.line; LIP = p.lip; };
   Truck.paintColors = function () { return { body: OR, light: OR_LT, dark: OR_DK, line: OR_LINE, lip: LIP }; };
   var SLATE = '#3b4250', SLATE_LT = '#545c6c';
@@ -172,11 +182,11 @@
     D.circle(ctx, cx, cy, 86, '#353b46');
     ctx.beginPath(); ctx.arc(cx, cy, 95, Math.PI * 1.1, Math.PI * 1.5); ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 6; ctx.stroke();
     var g = ctx.createRadialGradient(cx - 16, cy - 20, 6, cx, cy, 64);
-    g.addColorStop(0, '#ffffff'); g.addColorStop(0.6, '#d3d6dc'); g.addColorStop(1, '#a3a8b2');
+    g.addColorStop(0, RIM[0]); g.addColorStop(0.6, RIM[1]); g.addColorStop(1, RIM[2]);
     D.circle(ctx, cx, cy, 62, g, '#5a5f69', 5);
     D.circle(ctx, cx, cy, 46, null, '#9095a0', 3);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
-    D.circle(ctx, 0, 0, 30, '#555c69', INK, 3);
+    D.circle(ctx, 0, 0, 30, HUB, INK, 3);
     for (var j = 0; j < 6; j++) { var a = j * Math.PI / 3; D.circle(ctx, Math.cos(a) * 20, Math.sin(a) * 20, 4.5, '#2b2f38'); }
     for (var n = 0; n < 8; n++) { var b = n * Math.PI / 4 + 0.39; D.circle(ctx, Math.cos(b) * 52, Math.sin(b) * 52, 4, '#7d828d'); }
     ctx.restore();
@@ -317,6 +327,48 @@
     D.circle(ctx, 1520, 422, 13, '#fbfaf7', INK, 3);
   }
 
+  function has(a) { return ACC.indexOf(a) >= 0; }
+  function accessoriesBack(ctx) {
+    if (has('flaps')) {
+      [WHEELS[0] - 150, WHEELS[1] + 128].forEach(function (x) {
+        D.box(ctx, x, 640, 24, 100, 4, '#1d1f25', INK, 3);
+        ctx.fillStyle = OR; ctx.fillRect(x + 6, 680, 12, 12);
+      });
+    }
+  }
+  function accessoriesFront(ctx) {
+    if (has('stripe')) {
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(1218, 500, 400, 18);
+      ctx.fillStyle = OR_LINE; ctx.fillRect(1218, 520, 400, 8);
+    }
+    if (has('bullbar')) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 20; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(1640, 560); ctx.lineTo(1676, 560); ctx.lineTo(1676, 740); ctx.lineTo(1630, 740); ctx.stroke();
+      ctx.strokeStyle = '#c9d4e2'; ctx.lineWidth = 12; ctx.stroke();
+      ctx.strokeStyle = '#c9d4e2'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(1676, 620); ctx.lineTo(1650, 620); ctx.moveTo(1676, 680); ctx.lineTo(1650, 680); ctx.stroke();
+    }
+    if (has('lightbar')) {
+      D.box(ctx, 1290, 150, 260, 26, 8, '#2b303b', INK, 4);
+      for (var i = 0; i < 5; i++) D.box(ctx, 1300 + i * 50, 155, 38, 16, 5, Math.floor(TIME * 3 + i) % 2 ? '#ffb020' : '#ffe08a', INK, 2);
+    }
+    if (has('horns')) {
+      [0, 1].forEach(function (k) {
+        var y = 160 - k * 18, x = 1250 + k * 30;
+        ctx.fillStyle = '#e8f2ff'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.lineTo(x + 120, y); ctx.lineTo(x + 120, y + 20); ctx.lineTo(x, y + 12); ctx.closePath(); ctx.fill(); ctx.stroke();
+      });
+    }
+    if (has('beacon')) {
+      var on = Math.floor(TIME * 4) % 2 === 0;
+      D.box(ctx, 1560, 146, 36, 32, 10, on ? '#ff8a1f' : '#c95a00', INK, 4);
+      if (on) {
+        var g = ctx.createRadialGradient(1578, 160, 4, 1578, 160, 110);
+        g.addColorStop(0, 'rgba(255,150,40,.7)'); g.addColorStop(1, 'rgba(255,150,40,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(1578, 160, 110, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
   function cab(ctx) {
     ctx.lineJoin = 'round';
     // shell
@@ -421,6 +473,7 @@
     ctx.save();
     ctx.translate(OX, OY + this.bounce / S); ctx.rotate(this.pitch); ctx.translate(-OX, -OY);
     bodyBack(ctx, this);
+    accessoriesBack(ctx);
     ctx.restore();
 
     // wheels stay on the ground
@@ -437,6 +490,7 @@
     rails(ctx);
     if (hooks && hooks.overBed) hooks.overBed(ctx);
     cab(ctx);
+    accessoriesFront(ctx);
     ctx.restore();
 
     ctx.restore();

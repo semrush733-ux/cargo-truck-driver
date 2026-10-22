@@ -52,6 +52,12 @@
     return p[p.length - 1].y;
   };
 
+  World.prototype.sectionAt = function (x) {
+    var ss = this.road.sections || [];
+    for (var i = 0; i < ss.length; i++) if (x >= ss[i].x1 && x <= ss[i].x2) return ss[i];
+    return null;
+  };
+
   World.prototype.curveAt = function (x) {
     var cs = this.road.curves;
     for (var i = 0; i < cs.length; i++) if (x >= cs[i].x1 && x <= cs[i].x2) return cs[i];
@@ -65,6 +71,7 @@
       [L.destination.building.x1 - 40, L.destination.building.x2 + 80]
     ];
     (L.lights || []).forEach(function (l) { blocked.push([l.x - 160, l.x + 160]); });
+    (L.road.sections || []).forEach(function (sc) { if (sc.type === 'bridge') blocked.push([sc.x1 - 120, sc.x2 + 120]); });
     function free(x, pad) { pad = pad || 0; return !blocked.some(function (b) { return x > b[0] - pad && x < b[1] + pad; }); }
     var x, start = this.road.start - 900, end = this.road.end + 900;
 
@@ -95,6 +102,13 @@
       if (o.type === 'bump') this.props.push({ kind: 'sign', style: 'bump', x: o.x - 520, y: -44, text: kmh(o.limit) });
     }, this);
     (L.lights || []).forEach(function (l) { this.props.push({ kind: 'signal', x: l.x + 40, y: -46, light: l }); }, this);
+    var SECT_SIGN = { mud: 'MUD', sand: 'SAND', ice: 'ICE', rough: 'ROUGH', narrow: 'LANE', bridge: 'BRIDGE' };
+    (L.road.sections || []).forEach(function (sc) {
+      this.props.push({ kind: 'sign', style: 'section', sect: sc.type, x: sc.x1 - 700, y: -44, text: SECT_SIGN[sc.type] });
+    }, this);
+    (L.obstacles || []).forEach(function (o) {
+      if (o.type === 'pothole') this.props.push({ kind: 'sign', style: 'pothole', x: o.x - 600, y: -44, text: o.lane ? 'LEFT' : 'RIGHT' });
+    }, this);
     if (L.traffic) this.props.push({ kind: 'sign', x: L.traffic.exitX, y: -44, text: 'EXIT', sub: 'Traffic only ↗', color: '#1f8a43', w: 210 });
     this.props.sort(function (a, b) { return a.y - b.y; });
 
@@ -129,6 +143,7 @@
     var g = ctx.createLinearGradient(0, 0, 0, view.groundY);
     g.addColorStop(0, th.sky[0]); g.addColorStop(0.65, th.sky[1]); g.addColorStop(1, th.sky[2]);
     ctx.fillStyle = g; ctx.fillRect(0, 0, view.W, view.H);
+    if (this.level.weather === 'rain') { ctx.fillStyle = 'rgba(90,100,115,.55)'; ctx.fillRect(0, 0, view.W, view.H); }
     var t = view.t;
     if (th.night) {
       this.starsBg.forEach(function (s) {
@@ -241,6 +256,53 @@
     ctx.fillStyle = g;
     band(ctx, x0, x1, 40, function (x) { return H(x) - 110; }, function (x) { return H(x) + ROAD_TOP + 2; });
     ctx.fill();
+    this.drawBridgesFar(ctx, view);
+  };
+
+  function water(ctx, a, b, top, bottom, t) {
+    var g = ctx.createLinearGradient(0, top, 0, bottom);
+    g.addColorStop(0, '#5fb2e8'); g.addColorStop(1, '#2c6fb3');
+    ctx.fillStyle = g; ctx.fillRect(a, top, b - a, bottom - top);
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 3;
+    for (var y = top + 14; y < Math.min(bottom, top + 400); y += 26) {
+      ctx.beginPath();
+      for (var x = a; x <= b; x += 30) ctx.lineTo(x, y + Math.sin(x * 0.04 + t * 2 + y) * 4);
+      ctx.stroke();
+    }
+  }
+  World.prototype.drawBridgesFar = function (ctx, view) {
+    var H = this.heightAt, half = view.W / 2 / view.scale + 80, x0 = view.camX - half, x1 = view.camX + half, t = view.t;
+    (this.road.sections || []).forEach(function (sc) {
+      if (sc.type !== 'bridge' || sc.x2 < x0 || sc.x1 > x1) return;
+      var a = Math.max(sc.x1, x0), b = Math.min(sc.x2, x1), y = H((a + b) / 2);
+      water(ctx, a, b, y - 110, y + ROAD_TOP + 2, t);
+      // far railing
+      ctx.fillStyle = '#9aa3b2'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+      ctx.fillRect(sc.x1, H(sc.x1) + ROAD_TOP - 30, sc.x2 - sc.x1, 6);
+      for (var x = sc.x1; x <= sc.x2; x += 60) { ctx.fillRect(x - 3, H(x) + ROAD_TOP - 30, 6, 30); }
+    });
+  };
+  World.prototype.drawBridgesNear = function (ctx, view) {
+    var H = this.heightAt, half = view.W / 2 / view.scale + 80, x0 = view.camX - half, x1 = view.camX + half, t = view.t;
+    (this.road.sections || []).forEach(function (sc) {
+      if (sc.type !== 'bridge' || sc.x2 < x0 || sc.x1 > x1) return;
+      var a = Math.max(sc.x1, x0), b = Math.min(sc.x2, x1), y = H((a + b) / 2);
+      water(ctx, a, b, y + ROAD_BOTTOM + 70, y + ROAD_BOTTOM + 1600, t);
+      // deck girder + truss
+      ctx.fillStyle = '#5d6676'; ctx.fillRect(a, y + ROAD_BOTTOM, b - a, 70);
+      ctx.strokeStyle = '#3b4250'; ctx.lineWidth = 6;
+      for (var x = Math.floor(sc.x1 / 120) * 120; x < b; x += 120) {
+        if (x + 120 < a) continue;
+        ctx.beginPath(); ctx.moveTo(x, y + ROAD_BOTTOM + 4); ctx.lineTo(x + 60, y + ROAD_BOTTOM + 66); ctx.lineTo(x + 120, y + ROAD_BOTTOM + 4); ctx.stroke();
+      }
+      ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.strokeRect(a, y + ROAD_BOTTOM, b - a, 70);
+      // pillars at both ends
+      [sc.x1, sc.x2].forEach(function (px) { if (px >= x0 - 60 && px <= x1 + 60) D.box(ctx, px - 30, y + ROAD_BOTTOM, 60, 600, 4, '#8a93a3', INK, 3); });
+      // near railing
+      ctx.fillStyle = '#c9d4e2'; ctx.strokeStyle = INK; ctx.lineWidth = 2;
+      ctx.fillRect(a, y + ROAD_BOTTOM - 34, b - a, 7);
+      for (x = Math.floor(sc.x1 / 50) * 50; x <= b; x += 50) { if (x >= a) ctx.fillRect(x - 3, y + ROAD_BOTTOM - 34, 6, 34); }
+    });
   };
 
   World.prototype.drawProps = function (ctx, view) {
@@ -409,6 +471,21 @@
     var x = p.x, y = p.y;
     D.box(ctx, x - 5, y - 150, 10, 152, 3, '#9aa3b2', INK, 3);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (p.style === 'section' || p.style === 'pothole') {
+      ctx.save(); ctx.translate(x, y - 196); ctx.rotate(Math.PI / 4);
+      D.box(ctx, -42, -42, 84, 84, 8, p.sect === 'narrow' ? '#ff8a1f' : '#ffc21a', INK, 4);
+      ctx.restore();
+      ctx.fillStyle = INK; ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      if (p.style === 'pothole') { ctx.beginPath(); ctx.ellipse(x, y - 190, 26, 10, 0, 0, Math.PI * 2); ctx.fill(); }
+      else if (p.sect === 'ice') { for (var a = 0; a < 3; a++) { ctx.beginPath(); ctx.moveTo(x + Math.cos(a * 1.05) * 22, y - 196 + Math.sin(a * 1.05) * 22); ctx.lineTo(x - Math.cos(a * 1.05) * 22, y - 196 - Math.sin(a * 1.05) * 22); ctx.stroke(); } }
+      else if (p.sect === 'narrow') { ctx.beginPath(); ctx.moveTo(x - 14, y - 172); ctx.lineTo(x - 14, y - 218); ctx.moveTo(x + 14, y - 172); ctx.lineTo(x + 14, y - 200); ctx.lineTo(x + 2, y - 218); ctx.stroke(); }
+      else if (p.sect === 'bridge') { ctx.beginPath(); ctx.moveTo(x - 26, y - 178); ctx.quadraticCurveTo(x, y - 214, x + 26, y - 178); ctx.moveTo(x - 30, y - 190); ctx.lineTo(x + 30, y - 190); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.moveTo(x - 24, y - 182); ctx.lineTo(x - 10, y - 200); ctx.lineTo(x, y - 186); ctx.lineTo(x + 12, y - 206); ctx.lineTo(x + 24, y - 184); ctx.stroke(); }
+      D.box(ctx, x - 40, y - 140, 80, 30, 6, '#ffffff', INK, 3);
+      ctx.fillStyle = INK; ctx.font = '18px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(p.text, x, y - 124);
+      return;
+    }
     if (p.style === 'warning' || p.style === 'curve' || p.style === 'bump') {
       ctx.save(); ctx.translate(x, y - 196); ctx.rotate(Math.PI / 4);
       D.box(ctx, -42, -42, 84, 84, 8, '#ffc21a', INK, 4);
@@ -611,6 +688,47 @@
       ctx.fillStyle = INK; for (var by = y + ROAD_TOP + 8; by < y + ROAD_BOTTOM - 10; by += 18) ctx.fillRect(o.x - 22, by, 44, 8);
     });
 
+    // road sections
+    (L.road.sections || []).forEach(function (sc) {
+      if (sc.x2 < x0 || sc.x1 > x1) return;
+      var a = Math.max(sc.x1, x0), b = Math.min(sc.x2, x1), xx;
+      if (sc.type === 'mud' || sc.type === 'sand') {
+        ctx.fillStyle = sc.type === 'mud' ? 'rgba(110,72,36,.75)' : 'rgba(222,184,110,.8)';
+        band(ctx, a, b, 40, function (x) { return H(x) + ROAD_TOP + 4 + 6 * Math.sin(x * 0.05); }, function (x) { return H(x) + ROAD_BOTTOM - 4; }); ctx.fill();
+        ctx.fillStyle = sc.type === 'mud' ? 'rgba(70,44,20,.8)' : 'rgba(190,150,80,.8)';
+        for (xx = Math.floor(a / 70) * 70; xx < b; xx += 70) { ctx.beginPath(); ctx.ellipse(xx + 20, H(xx) + 10 + (xx % 3) * 10, 22, 6, 0, 0, Math.PI * 2); ctx.fill(); }
+      } else if (sc.type === 'ice') {
+        ctx.fillStyle = 'rgba(200,232,255,.6)';
+        band(ctx, a, b, 40, function (x) { return H(x) + ROAD_TOP + 4; }, function (x) { return H(x) + ROAD_BOTTOM - 4; }); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 3;
+        for (xx = Math.floor(a / 90) * 90; xx < b; xx += 90) { ctx.beginPath(); ctx.moveTo(xx, H(xx) + 30); ctx.lineTo(xx + 40, H(xx) - 20); ctx.stroke(); }
+      } else if (sc.type === 'rough') {
+        ctx.fillStyle = 'rgba(40,36,30,.35)';
+        for (xx = Math.floor(a / 55) * 55; xx < b; xx += 55) { var k = Math.abs(Math.sin(xx * 0.31)); ctx.fillRect(xx, H(xx) + ROAD_TOP + 8 + k * 60, 26 + k * 20, 8); }
+        ctx.strokeStyle = 'rgba(20,20,20,.45)'; ctx.lineWidth = 2.5;
+        for (xx = Math.floor(a / 120) * 120; xx < b; xx += 120) { ctx.beginPath(); ctx.moveTo(xx, H(xx) + 40); ctx.lineTo(xx + 20, H(xx) + 20); ctx.lineTo(xx + 10, H(xx) - 10); ctx.lineTo(xx + 34, H(xx) - 30); ctx.stroke(); }
+      } else if (sc.type === 'narrow') {
+        // cones close the far lane
+        for (xx = Math.floor(a / 110) * 110; xx < b; xx += 110) {
+          var cy = H(xx) - 20;
+          ctx.fillStyle = '#ff6a1f'; ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(xx - 12, cy); ctx.lineTo(xx, cy - 34); ctx.lineTo(xx + 12, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#fff'; ctx.fillRect(xx - 6, cy - 20, 12, 5);
+          ctx.fillStyle = '#2b2f38'; ctx.fillRect(xx - 15, cy - 2, 30, 5);
+        }
+        ctx.fillStyle = 'rgba(255,138,31,.18)';
+        band(ctx, a, b, 40, function (x) { return H(x) + ROAD_TOP + 2; }, function (x) { return H(x) - 12; }); ctx.fill();
+      }
+    });
+    // potholes
+    (L.obstacles || []).forEach(function (o) {
+      if (o.type !== 'pothole' || o.x < x0 - 60 || o.x > x1 + 60) return;
+      var py = H(o.x) + LANE_Y[o.lane] + 8;
+      ctx.fillStyle = '#2a2622'; ctx.beginPath(); ctx.ellipse(o.x, py, 36, 9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,110,95,.9)'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = 'rgba(80,110,140,.5)'; ctx.beginPath(); ctx.ellipse(o.x + 4, py + 2, 22, 5, 0, 0, Math.PI * 2); ctx.fill();
+    });
+
     // delivery zone
     var z = L.destination.zone;
     if (z.x2 > x0 && z.x1 < x1) {
@@ -665,8 +783,11 @@
     g.addColorStop(0, th.grass[0]); g.addColorStop(1, th.grass[1]);
     ctx.fillStyle = g;
     band(ctx, x0, x1, 40, function (x) { return H(x) + ROAD_BOTTOM + 16; }, function (x) { return H(x) + ROAD_BOTTOM + 1600; }); ctx.fill();
+    this.drawBridgesNear(ctx, view);
+    var self = this;
     this.tufts.forEach(function (tf) {
       if (tf.x < x0 || tf.x > x1) return;
+      var sc = self.sectionAt(tf.x); if (sc && sc.type === 'bridge') return;
       var s = tf.s, y = tf.y + H(tf.x);
       if (tf.rock) { ctx.fillStyle = '#9aa0aa'; ctx.beginPath(); ctx.ellipse(tf.x, y, 18 * s, 10 * s, 0, Math.PI, 0); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 2.5; ctx.stroke(); return; }
       ctx.strokeStyle = th.tuft; ctx.lineWidth = 4; ctx.lineCap = 'round';
@@ -685,7 +806,23 @@
 
   /** Screen-space weather / darkness on top of the side view. */
   World.prototype.drawWeather = function (ctx, view) {
-    var th = this.theme;
+    var th = this.theme, wx = this.level.weather;
+    if (wx === 'rain') {
+      ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+      ctx.fillStyle = 'rgba(30,45,70,.16)'; ctx.fillRect(0, 0, view.W, view.H);
+      ctx.strokeStyle = 'rgba(200,220,255,.45)'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (var r = 0; r < 110; r++) {
+        var rx = ((r * 97.3 + view.t * 900) % (view.W + 200)) - 100, ry = ((r * 53.7 + view.t * 1500 + r * r) % (view.H + 100)) - 50;
+        ctx.moveTo(rx, ry); ctx.lineTo(rx - 8, ry + 22);
+      }
+      ctx.stroke();
+    } else if (wx === 'fog') {
+      ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+      var fg = ctx.createLinearGradient(0, 0, 0, view.H);
+      fg.addColorStop(0, 'rgba(225,232,240,.55)'); fg.addColorStop(0.6, 'rgba(225,232,240,.28)'); fg.addColorStop(1, 'rgba(225,232,240,.12)');
+      ctx.fillStyle = fg; ctx.fillRect(0, 0, view.W, view.H);
+    }
     if (!th.snow) return;
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     ctx.fillStyle = 'rgba(255,255,255,.9)';

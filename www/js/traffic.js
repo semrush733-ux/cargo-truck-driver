@@ -23,6 +23,7 @@
     this.world = world;
     this.cfg = level.traffic;
     this.lights = level.lights || [];
+    this.narrow = (level.road.sections || []).filter(function (sc) { return sc.type === 'narrow'; });
     this.cars = [];
     this.rnd = D.rng((level.seed || 1) * 977 + 3);
     this.nextId = 1;
@@ -65,9 +66,12 @@
     var K = CT.K, n = this.density();
     for (var i = 0; i < n * 3 && this.cars.length < n; i++) {
       var x = truck.x + 1600 * K + this.rnd() * 4200 * K;
-      var lane = this.rnd() < 0.5 ? 0 : 1;
+      var lane = this.inNarrow(x) ? 0 : this.rnd() < 0.5 ? 0 : 1;
       if (x < this.cfg.exitX - 300 && this.spaceFree(x, lane, 260, truck)) this.cars.push(this.makeCar(x, lane));
     }
+  };
+  Traffic.prototype.inNarrow = function (x) {
+    return this.narrow.some(function (n) { return x > n.x1 - 2600 * CT.K && x < n.x2 + 300; });
   };
 
   /** Cars kept around the truck (lower when the player gets easy-mode help). */
@@ -116,8 +120,16 @@
         if (s === 'yellow' && stopDist > dist - 5) return;
         target = Math.min(target, Math.sqrt(2 * 520 * K * Math.max(0, dist - 10)));
       });
+      // roadworks: the left lane closes, so merge right before the cones
+      var narrowAhead = null;
+      self.narrow.forEach(function (n) { var d = n.x1 - cf; if (n.x2 > c.x - c.len && d < 2600 * K && (!narrowAhead || d < narrowAhead.d)) narrowAhead = { d: d, n: n }; });
+      if (narrowAhead && c.lane === 1) {
+        if (c.signal <= 0 && self.spaceFree(c.x, 0, c.len, truck, 120 * K, 160 * K)) c.signal = 0.5;
+        if (narrowAhead.d > -c.len) target = Math.min(target, Math.sqrt(2 * 520 * K * Math.max(0, narrowAhead.d - 60)));
+      }
       // lane changes: overtake a slow leader, or weave now and then
       c.laneCd -= dt;
+      if (narrowAhead && c.lane === 0) c.laneCd = Math.max(c.laneCd, 0.5);
       if (c.signal > 0) {
         c.signal -= dt;
         if (c.signal <= 0) {
@@ -148,7 +160,7 @@
     var need = this.density() - cars.length;
     for (var k = 0; k < need && k < 2; k++) {
       var x = truck.x + 2600 * K + this.rnd() * 1800 * K;
-      var lane = this.rnd() < 0.5 ? 0 : 1;
+      var lane = this.inNarrow(x) ? 0 : this.rnd() < 0.5 ? 0 : 1;
       if (x < exitX - 300 && this.spaceFree(x, lane, 260, truck)) cars.push(this.makeCar(x, lane));
     }
   };

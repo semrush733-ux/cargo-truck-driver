@@ -20,7 +20,7 @@
     for (var i = 0; i < pallets.length; i++) {
       var p = pallets[i];
       this.teams.push({
-        idx: i, pallet: p, x: p.x + (mode === 'unload' ? -40 : 0), dir: 1, phase: 'idle', t: 0,
+        idx: i, pallet: p, x: mode === 'unload' ? p.x - 40 : pallets[pallets.length - 1].x + 95 + i * 34, dir: -1, phase: 'idle', t: 0,
         delay: i * 0.6, walk: rnd() * 6, item: null, slot: -1,
         skin: [SKIN[Math.floor(rnd() * SKIN.length)], SKIN[Math.floor(rnd() * SKIN.length)]],
         shirt: [SHIRT[Math.floor(rnd() * SHIRT.length)], SHIRT[Math.floor(rnd() * SHIRT.length)]],
@@ -107,7 +107,10 @@
       var carryY = FEET + CARRY;
       if (self.mode === 'load') {
         switch (tm.phase) {
-          case 'wait': if (tm.t >= tm.delay) { tm.phase = 'pick'; tm.t = 0; it.state = ST.CARRY; } break;
+          case 'wait':                         // walk over to the load first, then pick it up
+            if (!moveTo(tm, tm.pallet.x, walkSpeed(tm, false), dt)) break;
+            if (tm.t >= tm.delay) { tm.phase = 'pick'; tm.t = 0; it.state = ST.CARRY; tm.dir = 1; }
+            break;
           case 'pick':
             var u = Math.min(1, tm.t / 0.45);
             it.x = tm.x; it.y = D.lerp(tm.pallet.y, carryY, u * u * (3 - 2 * u));

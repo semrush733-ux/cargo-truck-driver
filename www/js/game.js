@@ -42,7 +42,8 @@
   Game.CAMERAS = CAMERAS;
 
   // ================================================================ setup
-  Game.prototype.applyPaint = function () { CT.Truck.setPaint(CT.Garage.paint(CT.Storage.getPaint())); };
+  Game.prototype.applyPaint = function () { CT.Garage.applyLook(); };
+  var attemptSeq = 0;
 
   Game.prototype.setupMenuScene = function () {
     var L = CT.Levels.get(1);
@@ -83,6 +84,13 @@
     this.loadPallets = [0, 1, 2].map(function (i) { return { x: sx - 620 + i * 125, y: PALLET_Y }; });
     this.dropPallets = [0, 1, 2].map(function (i) { return { x: zc - 650 - i * 125, y: PALLET_Y }; });
     this.cargo = new CT.CargoManager(L, this.loadPallets);
+    this.cargo.stability = tr.cfg.stability;
+    this.cargo.onImpact = function (it, hit) { self.onCargoGround(it, hit); };
+    this.fuelMax = tr.cfg.fuelCapacity; this.fuel = this.fuelMax;
+    this.attemptId = (++attemptSeq) + '-' + Date.now();
+    this.drag = null; this.tweens = [];
+    this.knock = { curveT: 0, coneCd: 0, roughT: 0, lastLoss: -9 };
+    this.noFuelT = 0; this.deliverTarget = 0; this.recoverable = null;
     this.loadCrew = new CT.Crew(this, 'load', this.loadPallets);
     this.loadCrew.assign(this.cargo.items);
     this.loadCrew.onItem = function (it, counted) { self.onLoaded(it, counted); };
@@ -94,7 +102,7 @@
     this.stats = { time: 0, startX: L.start.x };
     this.health = 100;
     this.crashes = 0; this.violations = 0; this.curveHits = 0; this.bumpHits = 0;
-    this.flags = { winShown: false, failShown: false, brakeSqueal: false, curveWarned: {}, timeWarned: false };
+    this.flags = { winShown: false, failShown: false, brakeSqueal: false, curveWarned: {}, timeWarned: false, fuelWarned: false, distRecorded: false, sectWarned: {} };
     this.winTimer = -1; this.failTimer = -1;
     this.smokeT = 0; this.dustT = 0; this.squealT = 0;
     this.lt = 0;
@@ -110,8 +118,7 @@
     this.setState(S.LOADING);
     CT.UI.enterLevel(L, this);
     CT.UI.setCargo(0, this.cargo.required);
-    // workers start by themselves
-    this.later(0.9, function () { if (self.state === S.LOADING) self.loadCrew.start(); });
+    // the player drags each load onto the bed, or taps LOAD and the workers do it
     if (this.assist > 0) {
       this.later(0.4, function () { CT.UI.toast(self.assist > 1 ? 'Easy mode+: more time, less traffic, tougher cargo' : 'Easy mode: more time and less traffic', 'info'); });
     }
@@ -119,6 +126,8 @@
   };
 
   Game.prototype.toMenu = function () {
+    this.recordDistanceOnce();
+    this.drag = null;
     CT.Audio.engineOff();
     CT.Controls.releaseAll();
     this.level = null;
@@ -168,6 +177,7 @@
         CT.Audio.play('strap');
         var onTruck = this.cargo.items.filter(function (it) { return it.state === CT.CargoManager.STATE.TRUCK; })
           .sort(function (a, b) { return b.slot - a.slot; });               // rear slot to the nearest pallet
+        this.deliverTarget = onTruck.length;
         this.dropCrew.assign(onTruck);
         this.later(0.35, function () { self.dropCrew.start(); });
         break;
@@ -210,6 +220,7 @@
     CT.UI.showPause(false);
     CT.UI.hideWin(); CT.UI.hideFail();
     this.prevState = null;
+    this.recordDistanceOnce();
     this.startLevel(this.level.id);
   };
 
@@ -228,13 +239,171 @@
   // ================================================================ player actions
   Game.prototype.action = function () {
     if (this.state === S.LOADING) this.requestLoad();
+    else if (this.recoverable && this.isDriving()) this.requestRecover();
     else if (this.state === S.ARRIVED) this.requestDeliver();
   };
 
-  /** Workers start on their own; tapping LOAD only starts them early. */
+  /** LOAD button: the workers carry every load still on the pallets (the alternative to drag-and-drop). */
   Game.prototype.requestLoad = function () {
-    if (this.state !== S.LOADING) return false;
-    return this.loadCrew.start();
+    if (this.state !== S.LOADING || this.loadCrew.started) return false;
+    if (this.drag) this.cancelDrag();
+    var ST = CT.CargoManager.STATE, used = {};
+    this.cargo.items.forEach(function (it) { if (it.state === ST.TRUCK) used[it.slot] = true; });
+    this.loadCrew.teams.forEach(function (tm) {
+      if (!tm.item) return;
+      if (tm.item.state !== ST.DOCK) { tm.item = null; return; }
+      if (used[tm.slot]) { for (var s = 0; s < CT.Truck.SLOTS.length; s++) if (!used[s]) { tm.slot = s; break; } }
+      used[tm.slot] = true;
+    });
+    CT.Audio.play('click');
+    var ok = this.loadCrew.start();
+    CT.UI.refreshAction(this);
+    this.updateHints(true);
+    return ok;
+  };
+
+  // ---------------------------------------------------------------- drag-and-drop loading
+  Game.prototype.screenToWorld = function (sx, sy) {
+    var v = this.view;
+    return { x: (sx - v.W / 2 - v.shakeX) / v.scale + v.camX, y: (sy - v.groundY - v.shakeY) / v.scale + (v.camY || 0) };
+  };
+  Game.prototype.bedArea = function () {
+    var tr = this.truck, SL = CT.Truck.SLOTS;
+    var a = tr.artToWorld(SL[SL.length - 1] - 200, CT.Truck.BED_TOP), b = tr.artToWorld(SL[0] + 200, CT.Truck.BED_TOP);
+    return { x1: Math.min(a.x, b.x), x2: Math.max(a.x, b.x), y: a.y };
+  };
+  Game.prototype.freeSlotNear = function (x, prefer) {
+    var ST = CT.CargoManager.STATE, used = {}, tr = this.truck, best = -1, bd = 1e9;
+    this.cargo.items.forEach(function (o) { if (o.state === ST.TRUCK) used[o.slot] = true; });
+    if (prefer != null && prefer < CT.Truck.SLOTS.length && !used[prefer] && Math.abs(tr.slotWorld(prefer).x - x) < 90) return prefer;
+    for (var s = 0; s < CT.Truck.SLOTS.length; s++) {
+      if (used[s]) continue;
+      var d = Math.abs(tr.slotWorld(s).x - x);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  };
+  Game.prototype.pointerDown = function (sx, sy) {
+    if (this.state !== S.LOADING || this.drag) return false;
+    var w = this.screenToWorld(sx, sy), ST = CT.CargoManager.STATE, hit = null;
+    this.cargo.items.forEach(function (it) {
+      if (it.state !== ST.DOCK || it.tween) return;
+      if (Math.abs(w.x - it.x) < 78 && w.y > it.y - 115 && w.y < it.y + 25) hit = it;
+    });
+    if (!hit) return false;
+    if (this.loadCrew.started) { CT.UI.toast('The workers are already loading', 'info'); return false; }
+    this.loadCrew.teams.forEach(function (tm) { if (tm.item === hit) tm.item = null; });
+    hit.state = ST.CARRY;
+    this.drag = { it: hit, ox: w.x - hit.x, oy: w.y - hit.y, home: { x: hit.pallet.x, y: hit.pallet.y } };
+    CT.Audio.play('pickup'); CT.vibrate(15);
+    this.updateHints(true);
+    return true;
+  };
+  Game.prototype.pointerMove = function (sx, sy) {
+    if (!this.drag) return;
+    var w = this.screenToWorld(sx, sy), it = this.drag.it;
+    it.x = w.x - this.drag.ox; it.y = Math.min(PALLET_Y, w.y - this.drag.oy);
+    var bed = this.bedArea();
+    this.drag.over = it.x > bed.x1 - 40 && it.x < bed.x2 + 40 && it.y < bed.y + 90;
+  };
+  Game.prototype.pointerUp = function () {
+    var d = this.drag; if (!d) return;
+    this.drag = null;
+    var it = d.it, bed = this.bedArea();
+    var over = it.x > bed.x1 - 40 && it.x < bed.x2 + 40 && it.y < bed.y + 90 && it.y > bed.y - 520;
+    var slot = over ? this.freeSlotNear(it.x, it.id) : -1;
+    if (slot < 0) {
+      this.tweens.push({ it: it, x0: it.x, y0: it.y, x1: d.home.x, y1: d.home.y, t: 0, d: 0.35 });
+      it.tween = true;
+      CT.Audio.play('invalid'); CT.vibrate(40);
+      CT.UI.toast(over ? 'No free space on the bed' : 'Drop the ' + it.name + ' on the truck bed', 'warn');
+      return;
+    }
+    var lift = Math.max(-320, Math.min(0, (it.y - bed.y) / CT.Truck.S));
+    var counted = this.cargo.placeOnTruck(it, slot, lift);
+    this.onLoaded(it, counted);
+  };
+  Game.prototype.cancelDrag = function () {
+    if (!this.drag) return;
+    var it = this.drag.it; this.drag = null;
+    it.state = CT.CargoManager.STATE.DOCK; it.x = it.pallet.x; it.y = it.pallet.y;
+  };
+  Game.prototype.updateTweens = function (dt) {
+    for (var i = this.tweens.length - 1; i >= 0; i--) {
+      var tw = this.tweens[i], it = tw.it; tw.t += dt;
+      var u = Math.min(1, tw.t / tw.d), e = 1 - Math.pow(1 - u, 3);
+      it.x = D.lerp(tw.x0, tw.x1, e); it.y = D.lerp(tw.y0, tw.y1, e) - Math.sin(u * Math.PI) * 40;
+      if (u >= 1) { it.state = CT.CargoManager.STATE.DOCK; it.tween = false; it.pop = 1; this.tweens.splice(i, 1); }
+    }
+  };
+
+  // ---------------------------------------------------------------- lost cargo & recovery
+  /** Knocks one load off the bed (front load when thrown forward, rear load otherwise). */
+  Game.prototype.loseItem = function (dir, why, forced) {
+    if (this.level.tutorial || (!forced && this.lt - this.knock.lastLoss < 1.5)) return null;
+    var ST = CT.CargoManager.STATE, pick = forced || null;
+    if (!pick) this.cargo.items.forEach(function (it) {
+      if (it.state !== ST.TRUCK || it.lift < -1) return;
+      if (!pick || (dir > 0 ? it.slot < pick.slot : it.slot > pick.slot)) pick = it;
+    });
+    if (!pick) return null;
+    this.knock.lastLoss = this.lt;
+    this.cargo.knockOff(pick, this.truck, dir);
+    this.truck.cargoWeight = this.cargo.weightOnTruck();
+    this.health = this.cargo.condition(); CT.UI.setHealth(this.health, true);
+    CT.Audio.play('crash'); CT.vibrate([60, 40, 60]);
+    this.shake = Math.max(this.shake, 10);
+    CT.UI.setCargo(this.cargo.onTruckCount(), this.cargo.required, true);
+    if (pick.destroyed) CT.UI.toast('The ' + pick.name + ' was destroyed!', 'bad');
+    else CT.UI.toast((why ? why + ' ' : '') + 'The ' + pick.name + ' fell off! Stop next to it and tap RECOVER', 'bad');
+    this.checkCargoFail();
+    return pick;
+  };
+  Game.prototype.onCargoGround = function (it, hit) {
+    CT.Audio.play('bump');
+    this.effects.puff(it.x, it.y, 8);
+    if (hit >= 1) this.effects.text(it.x, it.y - 90, '-' + Math.round(hit) + '%', '#ff6b5e');
+    this.health = this.cargo.condition(); CT.UI.setHealth(this.health, true);
+    if (it.destroyed) { CT.UI.toast('The ' + it.name + ' broke when it hit the road', 'bad'); this.checkCargoFail(); }
+  };
+  Game.prototype.checkCargoFail = function () {
+    if (this.level.tutorial) return;
+    if (this.cargo.destroyedCount() > 1)
+      this.fail('Cargo destroyed', 'More than one load was destroyed. Brake earlier, take bends and bumps slowly, and buy Cargo straps and Suspension upgrades in the garage.');
+  };
+  /** A fallen (not destroyed) load that has come to rest next to the stopped truck. */
+  Game.prototype.findRecoverable = function () {
+    var tr = this.truck, mid = tr.x + (CT.Truck.FRONT + CT.Truck.REAR) / 2, best = null;
+    if (Math.abs(tr.v) > 30 * K) return null;
+    this.cargo.fallenRecoverable().forEach(function (it) {
+      if (!it.fall || !it.fall.rest) return;
+      var d = Math.abs(it.x - mid);
+      if (d < 520 && (!best || d < best.d)) best = { it: it, d: d };
+    });
+    return best ? best.it : null;
+  };
+  Game.prototype.requestRecover = function () {
+    var it = this.findRecoverable(); if (!it) return false;
+    var slot = this.cargo.recover(it);
+    if (slot < 0) return false;
+    this.truck.cargoWeight = this.cargo.weightOnTruck();
+    this.health = this.cargo.condition(); CT.UI.setHealth(this.health);
+    CT.Audio.play('pickup'); CT.vibrate(25);
+    var p = this.truck.slotWorld(slot);
+    this.effects.sparkle(p.x, p.y - 60, 12);
+    CT.UI.setCargo(this.cargo.onTruckCount(), this.cargo.required, true);
+    CT.UI.toast('The ' + it.name + ' is back on the truck', 'good');
+    this.recoverable = null;
+    CT.UI.refreshAction(this);
+    return true;
+  };
+  Game.prototype.minDeliver = function () {
+    return this.level.tutorial ? this.cargo.required : Math.max(1, this.cargo.required - 1);
+  };
+  Game.prototype.recordDistanceOnce = function () {
+    if (!this.level || !this.truck || !this.flags || this.flags.distRecorded) return;
+    this.flags.distRecorded = true;
+    CT.Progress.recordDistance(Math.round(this.truck.distance * CT.Levels.METERS_PER_UNIT));
   };
 
   Game.prototype.cycleCamera = function () {
@@ -289,7 +458,7 @@
     CT.Audio.play('deliver');
     this.effects.sparkle(it.x, it.y - 50, 16, '#7dff8a');
     this.effects.text(it.x, it.y - 110, this.cargo.deliveredCount() + '/' + this.cargo.required, '#7dff8a');
-    CT.UI.setCargo(this.cargo.deliveredCount(), this.cargo.required, true);
+    CT.UI.setCargo(this.cargo.deliveredCount(), this.deliverTarget, true);
     CT.vibrate(25);
     this.updateHints(true);
   };
@@ -303,16 +472,25 @@
   };
 
   // ================================================================ damage & rules
+  /** Damage is spread over the loads on the bed by their sensitivity (glass and fridges suffer most). */
   Game.prototype.damage = function (amount) {
-    var mult = (this.cargo.fragile ? 1.8 : 1) * this.truck.cfg.damageMult * this.damageAssist;
-    var d = amount * mult;
-    if (d <= 0) return 0;
-    this.health = Math.max(0, this.health - d);
-    var p = this.truck.artToWorld(620, 260);
-    if (d >= 1) this.effects.text(p.x, p.y - 60, '-' + Math.round(d) + '%', '#ff6b5e');
+    var mult = this.truck.cfg.damageMult * this.damageAssist * (this.level.tutorial ? 0.5 : 1);
+    if (!(amount * mult > 0)) return 0;
+    var res = this.cargo.damageItems(amount, mult);
+    if (!res) return 0;
+    var self = this, ST = CT.CargoManager.STATE;
+    this.health = this.cargo.condition();
+    var p = this.truck.slotWorld(res.item.slot);
+    if (res.amount >= 1) this.effects.text(p.x, p.y - 110, '-' + Math.round(res.amount) + '%', '#ff6b5e');
     CT.UI.setHealth(this.health, true);
-    if (this.health <= 0) this.fail('Cargo destroyed', 'Too many hits damaged all the cargo. Drive gently, slow down for bends and bumps, and avoid crashes. Suspension upgrades help.');
-    return d;
+    this.cargo.items.forEach(function (it) {
+      if (it.state === ST.TRUCK && it.health <= 0 && !it.destroyed) {
+        it.destroyed = true;
+        if (self.level.tutorial) { it.health = 1; it.destroyed = false; return; }   // the tutorial never breaks cargo
+        self.loseItem(1, null, it);
+      }
+    });
+    return res.amount;
   };
 
   Game.prototype.onImpact = function (speed, dir) {
@@ -344,7 +522,8 @@
     this.effects.puff(x, this.truck.y - 30, 14);
     this.effects.sparkle(x, this.truck.y - 50, 10, '#ffffff');
     this.damage(8 + rel * 0.07);
-    CT.UI.toast('Crash! Keep a safe distance from cars.', 'bad');
+    if (rel > 150 + 35 * this.truck.cfg.stability) this.loseItem(ev.front ? 1 : -1, 'Crash!');
+    else CT.UI.toast('Crash! Keep a safe distance from cars.', 'bad');
   };
 
   Game.prototype.checkRules = function (dt, prevFront, prevX) {
@@ -373,7 +552,9 @@
           self.cargo.jolt(v / K * 0.4, 1);
           self.shake = Math.max(self.shake, 5);
           self.damage((v - o.limit) / K * 0.06);
-          CT.UI.toast('Too fast over the speed bump!', 'warn');
+          self.cargo.bounce((v - o.limit) / K * 0.5);
+          if ((v - o.limit) / K > 140 + 30 * tr.cfg.stability) self.loseItem(-1, 'Too fast over the bump!');
+          else CT.UI.toast('Too fast over the speed bump!', 'warn');
         }
       }
     });
@@ -382,6 +563,7 @@
       var over = (Math.abs(tr.v) - c.limit) / K;
       this.damage(over * 0.032 * dt * (1.4 - (tr.cfg.grip || 1) * 0.4));
       this.cargo.jolt(over * dt * 6, c.dir);
+      if (over > 70) { this.knock.curveT += dt; if (this.knock.curveT > 1.3 + 0.25 * tr.cfg.stability) { this.knock.curveT = 0; this.loseItem(c.dir, 'Too fast in the bend!'); } }
       this.squealT -= dt;
       if (this.squealT <= 0) { CT.Audio.play('squeal'); this.squealT = 0.6; }
       if (!this.flags.curveWarned[c.x1]) {
@@ -392,9 +574,85 @@
     }
   };
 
+  /** Road surfaces, narrow roadworks and potholes. */
+  Game.prototype.checkRoad = function (dt, prevX) {
+    var L = this.level, tr = this.truck, self = this, sec = this.world.sectionAt(tr.x + 170);
+    var tyre = 1 - tr.cfg.tyres * 0.08, kmhNow = Math.abs(CT.Garage.kmh(tr.v)), surf = null;
+    if (sec) {
+      if (sec.type === 'mud') surf = { grip: 1 - 0.25 * tyre, drag: 1.5, cap: 1040 + tr.cfg.tyres * 40 };
+      else if (sec.type === 'sand') surf = { grip: 1 - 0.2 * tyre, drag: 1, cap: 1180 + tr.cfg.tyres * 40 };
+      else if (sec.type === 'ice') surf = { grip: 1 - 0.55 * tyre, drag: 0 };
+      else if (sec.type === 'rough') surf = { grip: 0.95, drag: 0.5 };
+      if (!this.flags.sectWarned[sec.x1]) {
+        this.flags.sectWarned[sec.x1] = true;
+        var MSG = { mud: 'Mud! The truck slows down', sand: 'Deep sand! Keep the gas on', ice: 'Ice! Brake early, the truck slides', rough: 'Rough road! Slow down to protect the cargo', narrow: 'Roadworks: left lane closed', bridge: 'Bridge' };
+        if (MSG[sec.type] && sec.type !== 'bridge') CT.UI.toast(MSG[sec.type], sec.type === 'narrow' || sec.type === 'ice' ? 'warn' : 'info');
+      }
+      if (sec.type === 'rough' && kmhNow > 100) {
+        this.knock.roughT -= dt;
+        if (this.knock.roughT <= 0) {
+          this.knock.roughT = 0.32;
+          tr.jolt(-Math.min(60, (kmhNow - 100) * 0.4));
+          this.cargo.bounce(20 + (kmhNow - 100) * 0.3);
+          this.damage((kmhNow - 100) * 0.012);
+        }
+      }
+      if (sec.type === 'narrow' && tr.laneT > 0.35) {
+        this.knock.coneCd -= dt;
+        if (this.knock.coneCd <= 0) {
+          this.knock.coneCd = 1.2;
+          tr.v *= 0.55; tr.lane = 0;
+          tr.jolt(-40);
+          this.cargo.jolt(Math.abs(tr.v) / K * 0.3, 1);
+          this.damage(3 + kmhNow * 0.02);
+          this.shake = Math.max(this.shake, 6);
+          CT.Audio.play('bump');
+          CT.UI.toast('You hit the cones! Keep to the RIGHT lane', 'bad');
+        }
+      }
+    }
+    tr.surface = surf;
+    (L.obstacles || []).forEach(function (o) {
+      if (o.type !== 'pothole') return;
+      var wx = tr.x + 170, pw = prevX + 170;
+      if (!((pw < o.x && wx >= o.x) || (pw > o.x && wx <= o.x))) return;
+      if (tr.lanesOccupied().indexOf(o.lane) < 0) return;
+      var v = Math.abs(tr.v);
+      tr.jolt(-Math.min(140, v / K * 0.3));
+      self.cargo.bounce(Math.min(160, v / K * 0.35));
+      CT.Audio.play('bump');
+      self.shake = Math.max(self.shake, 4);
+      if (v > o.limit) {
+        self.damage((v - o.limit) / K * 0.05);
+        if ((v - o.limit) / K > 200 + 30 * tr.cfg.stability) self.loseItem(-1, 'Pothole!');
+        else CT.UI.toast('Pothole! Steer around it or slow down', 'warn');
+      }
+    });
+  };
+
+  Game.prototype.updateFuel = function (dt, prevX, input) {
+    var tr = this.truck, L = this.level;
+    var moved = Math.abs(tr.x - prevX), w = this.cargo.weightOnTruck();
+    var use = L.fuelRate * moved * (0.4 + 0.6 * tr.throttle + 0.3 * tr.revThrottle) * (1 + w * 0.025);
+    if (this.state !== S.READY_TO_DRIVE) use += dt * 0.02;
+    this.fuel = Math.max(0, this.fuel - use);
+    var frac = this.fuel / this.fuelMax;
+    if (frac < 0.2 && !this.flags.fuelWarned && this.fuel > 0) {
+      this.flags.fuelWarned = true; CT.Audio.play('lowfuel'); CT.UI.toast('Low fuel! Drive smoothly to the hub', 'warn');
+    }
+    if (this.fuel <= 0 && !tr.noFuel) { tr.noFuel = true; CT.Audio.play('alarm'); CT.UI.toast('Out of fuel!', 'bad'); }
+    if (tr.noFuel && Math.abs(tr.v) < 5 * K && !this.zone.inside) {
+      this.noFuelT += dt;
+      if (this.noFuelT > 1.5) this.fail('Out of fuel', 'The tank ran dry before the delivery. Hold the gas less, avoid driving back and forth, and buy a bigger Fuel tank in the garage.');
+    } else this.noFuelT = 0;
+  };
+
   Game.prototype.fail = function (title, text) {
     if (this.flags.failShown || this.flags.winShown) return;
     this.flags.failShown = true;
+    this.drag = null;
+    CT.Progress.recordFail();
+    this.recordDistanceOnce();
     var n = CT.Storage.addFail(this.level.id);
     var help = '';
     if (!this.level.tutorial) {
@@ -437,7 +695,7 @@
   Game.prototype.updateMenu = function (dt) {
     var m = this.menuScene;
     m.truck.update(dt, { gas: true, brake: false, reverse: false }, this.menuWorld.heightAt, true);
-    m.cargo.update(dt, m.truck.accelSm);
+    m.cargo.update(dt, m.truck.accelSm, this.menuWorld.heightAt);
     if (m.truck.x > 9500) { m.truck.place(1900, this.menuWorld.heightAt); m.truck.v = 150 * K; this.view.camX = this.cameraTarget(S.MAIN_MENU); this.fade = 1; }
     this.emitDriveFx(m.truck, dt, 0.6);
   };
@@ -456,14 +714,16 @@
       this.traffic.update(dt, tr, this.lt);
       if (drive) this.traffic.resolveTruck(tr).forEach(this.crash, this);
     }
-    if (drive && !L.tutorial) this.checkRules(dt, prevFront, prevX);
-    this.cargo.update(dt, tr.accelSm);
+    if (drive && !L.tutorial) { this.checkRules(dt, prevFront, prevX); this.checkRoad(dt, prevX); }
+    if (drive && !ended) this.updateFuel(dt, prevX, input);
+    this.cargo.update(dt, tr.accelSm, this.world.heightAt);
+    this.updateTweens(dt);
     this.loadCrew.update(dt);
     this.dropCrew.update(dt);
 
     if (st === S.LOADING) {
       if (this.cargo.loadedCount() >= this.cargo.required && this.cargo.allStrapped()) this.setState(S.READY_TO_DRIVE);
-      else CT.UI.setProgress(this.cargo.loadedCount() / this.cargo.required, this.loadCrew.remaining() + (this.loadCrew.started ? 0.4 : 1.3));
+      else if (this.loadCrew.started) CT.UI.setProgress(this.cargo.loadedCount() / this.cargo.required, this.loadCrew.remaining() + 0.4);
     } else if (st === S.READY_TO_DRIVE) {
       if (input.gas || input.reverse) this.setState(S.DRIVING);
     }
@@ -472,15 +732,19 @@
     var rear = tr.x + CT.Truck.REAR, front = tr.x + CT.Truck.FRONT;
     this.zone.inside = rear >= z.x1 - 60 && front <= z.x2 + 60;
     this.zone.ready = this.zone.inside && Math.abs(tr.v) < L.delivery.maxSpeed && !input.gas && !input.reverse &&
-      tr.laneIndex() !== -1 && this.cargo.onTruckCount() === this.cargo.required;
+      tr.laneIndex() !== -1 && this.cargo.onTruckCount() >= this.minDeliver();
+    var rec = drive && !ended ? this.findRecoverable() : null;
+    if (rec !== this.recoverable) { this.recoverable = rec; CT.UI.refreshAction(this); this.updateHints(true); }
+    if (drive && !ended && !L.tutorial && this.cargo.onTruckCount() + this.cargo.fallenRecoverable().length < this.minDeliver())
+      this.fail('Too much cargo lost', 'Too many loads fell off or broke. Slow down for bends, bumps and potholes, and buy Cargo straps in the garage.');
     this.zone.show = (st === S.READY_TO_DRIVE || st === S.DRIVING || st === S.ARRIVED);
 
     if (this.state === S.DRIVING && this.zone.ready) this.setState(S.ARRIVED);
     else if (this.state === S.ARRIVED && !this.zone.ready) this.setState(S.DRIVING);
 
     if (this.state === S.DELIVERING) {
-      CT.UI.setProgress(this.cargo.deliveredCount() / this.cargo.required, this.dropCrew.remaining());
-      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.cargo.required) {
+      CT.UI.setProgress(this.cargo.deliveredCount() / this.deliverTarget, this.dropCrew.remaining());
+      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.deliverTarget) {
         this.flags.winShown = true;
         this.completeLevel();
       }
@@ -504,25 +768,39 @@
   };
 
   Game.prototype.completeLevel = function () {
-    var L = this.level, time = this.stats.time;
-    var safe = this.crashes === 0 && this.violations === 0 && this.health >= 90;
+    var L = this.level, time = this.stats.time, C = this.cargo;
+    var delivered = C.deliveredCount(), lost = C.required - delivered;
+    var cond = Math.round(C.items.filter(function (it) { return C.delivered.has(it.id); })
+      .reduce(function (s2, it) { return s2 + it.health; }, 0) / Math.max(1, delivered));
+    var damagePct = 100 - cond;
+    var safe = this.crashes === 0 && this.violations === 0 && cond >= 90 && lost === 0;
     var fast = time <= this.par;
     var stars = 1 + (safe ? 1 : 0) + (fast ? 1 : 0);
     var saved = CT.Storage.completeLevel(L.id, { stars: stars, time: time });
     CT.Storage.clearFails(L.id);
-    var coins = CT.Garage.reward(L, stars, saved);
-    CT.Storage.addCoins(coins);
+    var br = CT.Rewards.levelBreakdown(L, { safe: safe, fast: fast, lost: lost }, saved);
+    var coins = CT.Rewards.grant('lvl:' + L.id + ':' + this.attemptId, br.total, false);
+    this.recordDistanceOnce();
+    CT.Progress.recordDelivery({ delivered: delivered, lost: lost, stars: stars, damagePct: damagePct, crashes: this.crashes, violations: this.violations, fast: fast });
     var next = CT.Levels.get(L.id + 1);
     var label = CT.CargoManager.label(L.cargo).toLowerCase();
+    var why = [];
+    if (lost) why.push(lost + ' load' + (lost > 1 ? 's' : '') + ' lost on the way');
+    if (cond < 90) why.push('cargo condition ' + cond + '% (needs 90%)');
+    if (this.crashes) why.push(this.crashes + ' crash' + (this.crashes > 1 ? 'es' : ''));
+    if (this.violations) why.push(this.violations + ' red light' + (this.violations > 1 ? 's' : ''));
+    if (!fast) why.push('slower than the ' + CT.UI.fmtTime(this.par) + ' target');
     this.result = {
       levelId: L.id, levelName: L.name,
-      delivered: this.cargo.deliveredCount(), required: this.cargo.required,
+      loaded: C.loadedCount(), delivered: delivered, required: C.required, lost: lost, condition: cond,
       distance: this.truck.distance * CT.Levels.METERS_PER_UNIT,
-      time: time, par: this.par, stars: stars, isBest: saved.isBest, coins: coins,
-      health: this.health, crashes: this.crashes, violations: this.violations,
+      time: time, par: this.par, stars: stars, isBest: saved.isBest, coins: coins, breakdown: br.lines,
+      fuelLeft: Math.round(this.fuel / this.fuelMax * 100),
+      health: cond, crashes: this.crashes, violations: this.violations,
+      explain: stars === 3 ? 'Perfect run: every load arrived safely and on time!' : 'Missed stars: ' + why.join(', ') + '.',
       criteria: [
-        { ok: true, title: 'Cargo delivered', detail: this.cargo.deliveredCount() + '/' + this.cargo.required + ' · ' + label },
-        { ok: safe, title: 'Safe driving', detail: 'Cargo ' + Math.round(this.health) + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.violations + ' red light' + (this.violations === 1 ? '' : 's') },
+        { ok: true, title: 'Cargo delivered', detail: delivered + '/' + C.required + ' · ' + label + (lost ? ' · ' + lost + ' lost' : '') },
+        { ok: safe, title: 'Safe driving', detail: 'Condition ' + cond + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.violations + ' red light' + (this.violations === 1 ? '' : 's') },
         { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(this.par) + ')' }
       ],
       hasNext: !!(next && next.implemented)
@@ -586,14 +864,20 @@
       case S.LOADING:
         var n = this.cargo.loadedCount();
         if (n >= this.cargo.required) { key = 'load-strap'; title = 'Strapping the cargo…'; }
-        else { key = 'load-' + n; title = 'Workers are loading ' + label; sub = n + '/' + this.cargo.required + ' on the truck'; }
+        else if (this.loadCrew.started) { key = 'load-' + n; title = 'Workers are loading ' + label; sub = n + '/' + this.cargo.required + ' on the truck'; }
+        else if (this.drag) { key = 'drag'; title = 'Drop it on the truck bed'; sub = 'The green area shows where'; }
+        else { key = 'loadp-' + n; title = 'Drag the ' + label + ' onto the truck'; sub = n + '/' + this.cargo.required + ' loaded · or tap LOAD for the workers'; }
         break;
       case S.READY_TO_DRIVE:
         key = 'ready'; title = "Cargo loaded! Let's drive."; sub = 'Hold GAS to drive to the ' + L.destination.name; tone = 'good';
         break;
       case S.DRIVING:
         var front = tr.x + CT.Truck.FRONT, rear = tr.x + CT.Truck.REAR, A = this.ahead(), cv = this.world.curveAt(tr.x);
-        if (front > z.x2 + 60) { key = 'over'; title = 'A little too far!'; sub = 'Hold REVERSE to back into the green zone'; tone = 'warn'; }
+        var fallen = this.cargo.fallenRecoverable(), secA = this.world.sectionAt(front + 400 * K);
+        if (this.recoverable) { key = 'recover'; title = 'Cargo on the road!'; sub = 'Tap RECOVER to put the ' + this.recoverable.name + ' back'; tone = 'warn'; }
+        else if (fallen.length && this.cargo.onTruckCount() < this.minDeliver()) { key = 'fallen'; title = 'Go back for the ' + fallen[0].name; sub = 'Stop next to it, then tap RECOVER'; tone = 'warn'; }
+        else if (tr.noFuel) { key = 'nofuel'; title = 'Out of fuel'; sub = 'Roll into the green zone if you can'; tone = 'warn'; }
+        else if (front > z.x2 + 60) { key = 'over'; title = 'A little too far!'; sub = 'Hold REVERSE to back into the green zone'; tone = 'warn'; }
         else if (this.zone.inside && Math.abs(tr.v) >= L.delivery.maxSpeed) { key = 'brake'; title = 'You are in the zone!'; sub = 'Hold BRAKE to stop'; tone = 'warn'; }
         else if (this.zone.inside && tr.laneIndex() === -1) { key = 'lanechg'; title = 'Finish the lane change'; }
         else if (this.zone.inside) { key = 'release'; title = 'Let go of the pedals'; sub = 'Stop completely to deliver'; }
@@ -602,13 +886,15 @@
         else if (A.light && A.light.s === 'red') { key = 'red'; title = 'Red light ahead'; sub = 'Stop before the white line'; tone = 'warn'; }
         else if (A.light) { key = 'yellow'; title = 'Light is changing'; sub = 'Get ready to stop'; tone = 'warn'; }
         else if (A.car) { key = 'traffic'; title = 'Slow traffic ahead'; sub = 'Brake, or steer LEFT / RIGHT to overtake'; tone = 'warn'; }
+        else if (secA && secA.type === 'narrow' && tr.lane === 1) { key = 'narrow'; title = 'Left lane closed ahead'; sub = 'Steer RIGHT before the cones'; tone = 'warn'; }
         else if (A.curve && Math.abs(tr.v) > A.curve.c.limit) { key = 'curve'; title = 'Bend ahead'; sub = 'Slow to ' + kmh(A.curve.c.limit) + ' km/h'; tone = 'warn'; }
         else if (A.bump && Math.abs(tr.v) > A.bump.o.limit) { key = 'bump'; title = 'Speed bump ahead'; sub = 'Slow to ' + kmh(A.bump.o.limit) + ' km/h'; tone = 'warn'; }
         else if (tr.x < L.start.x - 60) { key = 'wrong'; title = 'The hub is the other way'; sub = 'Hold GAS to drive forward'; tone = 'warn'; }
         else { key = 'drive'; title = 'Drive to the ' + L.destination.name; sub = Math.round(remaining) + ' m to go'; }
         break;
       case S.ARRIVED:
-        key = 'arrived'; title = 'Perfect stop!'; sub = 'Tap DELIVER to unload'; tone = 'good';
+        key = this.recoverable ? 'recover' : 'arrived'; title = this.recoverable ? 'Cargo on the road!' : 'Perfect stop!';
+        sub = this.recoverable ? 'Tap RECOVER first' : 'Tap DELIVER to unload'; tone = 'good';
         break;
       case S.DELIVERING:
         key = 'deliver-' + this.cargo.deliveredCount(); title = 'Workers are unloading…'; sub = this.cargo.deliveredCount() + '/' + this.cargo.required + ' delivered';
@@ -718,9 +1004,15 @@
     if (!inMenu) {
       this.loadCrew.drawPallets(ctx);
       this.dropCrew.drawPallets(ctx);
-      cargo.drawWorld(ctx, function (it) { return it.state === ST.DOCK || it.state === ST.STORED; });
-      this.loadCrew.draw(ctx, this.t);
+      var dragIt = this.drag ? this.drag.it : null;
+      if (this.state === S.LOADING && !this.loadCrew.started && this.cargo.loadedCount() < this.cargo.required) this.drawDropZone(ctx);
+      var crewFirst = !this.loadCrew.started;          // idle workers stand behind the loads so they are easy to grab
+      if (crewFirst) this.loadCrew.draw(ctx, this.t);
+      cargo.drawWorld(ctx, function (it) { return (it.state === ST.DOCK || it.state === ST.STORED || it.state === ST.FALLEN) && it !== dragIt; });
+      if (!crewFirst) this.loadCrew.draw(ctx, this.t);
       this.dropCrew.draw(ctx, this.t);
+      if (dragIt) { cargo.drawWorld(ctx, function (it) { return it === dragIt; }); }
+      if (this.recoverable) this.drawRecoverMark(ctx, this.recoverable);
     }
     this.effects.draw(ctx, this.t);
 
@@ -729,6 +1021,36 @@
     this.drawSpeedStreaks(ctx);
     if (!inMenu && (this.state === S.DRIVING || this.state === S.READY_TO_DRIVE)) this.drawEdgeIndicator(ctx);
     if (this.fade > 0) this.drawFade(ctx);
+  };
+
+  Game.prototype.drawDropZone = function (ctx) {
+    var bed = this.bedArea(), pulse = 0.5 + 0.5 * Math.sin(this.t * 5), over = this.drag && this.drag.over;
+    ctx.save();
+    ctx.fillStyle = over ? 'rgba(80,230,110,' + (0.35 + 0.15 * pulse) + ')' : 'rgba(80,230,110,' + (this.drag ? 0.22 : 0.1 + 0.08 * pulse) + ')';
+    ctx.strokeStyle = over ? '#2bd45a' : 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 4; ctx.setLineDash([14, 10]); ctx.lineDashOffset = -this.t * 30;
+    D.rr(ctx, bed.x1, bed.y - 110, bed.x2 - bed.x1, 110, 10); ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+    if (!this.drag) {
+      var ST = CT.CargoManager.STATE, first = null;
+      this.cargo.items.forEach(function (it) { if (it.state === ST.DOCK && !first) first = it; });
+      if (first) {          // a bouncing hand points at the next load to drag
+        var hy = first.y - 140 - Math.abs(Math.sin(this.t * 4)) * 22;
+        ctx.fillStyle = '#ffffff'; ctx.strokeStyle = D.INK; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(first.x, hy + 34); ctx.lineTo(first.x - 18, hy + 6); ctx.lineTo(first.x - 7, hy + 6); ctx.lineTo(first.x - 7, hy - 22);
+        ctx.lineTo(first.x + 7, hy - 22); ctx.lineTo(first.x + 7, hy + 6); ctx.lineTo(first.x + 18, hy + 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  };
+  Game.prototype.drawRecoverMark = function (ctx, it) {
+    var y = it.y - 130 - Math.abs(Math.sin(this.t * 4)) * 16;
+    ctx.save();
+    ctx.fillStyle = '#ffc21a'; ctx.strokeStyle = D.INK; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(it.x, y, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = D.INK; ctx.font = '28px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('!', it.x, y + 1);
+    ctx.restore();
   };
 
   /** Horizontal wind streaks in the side view at high speed. */

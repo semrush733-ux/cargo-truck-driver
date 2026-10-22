@@ -71,6 +71,17 @@
     }
   } catch (e) {}
 
+  // drag-and-drop loading: pointer on the scene (not on a button or a dialog)
+  var app = document.getElementById('app'), dragPtr = null;
+  app.addEventListener('pointerdown', function (e) {
+    if (dragPtr !== null || (e.target.closest && e.target.closest('button, .modal-wrap, .hud-top, input, label'))) return;
+    if (game.pointerDown(e.clientX, e.clientY)) { dragPtr = e.pointerId; e.preventDefault(); }
+  });
+  window.addEventListener('pointermove', function (e) { if (e.pointerId === dragPtr) { game.pointerMove(e.clientX, e.clientY); e.preventDefault(); } }, true);
+  function endDrag(e) { if (e.pointerId === dragPtr) { dragPtr = null; game.pointerUp(); } }
+  window.addEventListener('pointerup', endDrag, true);        // capture phase: a button under the finger cannot swallow it
+  window.addEventListener('pointercancel', endDrag, true);
+
   // stop pinch-zoom / double-tap zoom / long-press menus during play
   ['gesturestart', 'gesturechange', 'dblclick'].forEach(function (ev) { document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false }); });
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -85,4 +96,10 @@
 
   CT.UI.showMenu();
   startLoop();
+  setTimeout(function () { CT.UI.hideSplash(); }, 900);
+  // background music starts after the first tap (browsers block audio before that)
+  document.addEventListener('pointerdown', function first() {
+    document.removeEventListener('pointerdown', first);
+    try { CT.Audio.unlock(); CT.Audio.music(true); } catch (e) {}
+  });
 })(window.CT);

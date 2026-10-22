@@ -61,13 +61,19 @@
       // gyro steering: tilt the phone left/right to change lanes
       var gyroSide = 0;
       window.addEventListener('deviceorientation', function (e) {
-        if (!Controls.gyro || !Controls.enabled || e.beta == null) return;
+        if (e.beta == null) return;
         var ang = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
-        var tilt = ang === 90 ? e.beta : ang === -90 || ang === 270 ? -e.beta : e.gamma;
+        var raw = ang === 90 ? e.beta : ang === -90 || ang === 270 ? -e.beta : e.gamma;
+        Controls.gyroAvailable = true;
+        Controls.rawTilt = raw;
+        var tilt = raw - Controls.neutral;
+        var sens = (CT.Storage && CT.Storage.getSetting('gyroSens')) || 15;     // degrees of tilt for a full lane change / full lock
         Controls.tilt = tilt;
-        if (tilt < -15 && gyroSide !== -1) { gyroSide = -1; Controls.fire('lane', 1); }
-        else if (tilt > 15 && gyroSide !== 1) { gyroSide = 1; Controls.fire('lane', 0); }
-        else if (Math.abs(tilt) < 7) gyroSide = 0;
+        Controls.steerTilt = Math.max(-1, Math.min(1, tilt / sens));
+        if (!Controls.gyro || !Controls.enabled) return;
+        if (tilt < -sens && gyroSide !== -1) { gyroSide = -1; Controls.fire('lane', 1); }
+        else if (tilt > sens && gyroSide !== 1) { gyroSide = 1; Controls.fire('lane', 0); }
+        else if (Math.abs(tilt) < sens * 0.45) gyroSide = 0;
       });
 
       window.addEventListener('keydown', function (e) {
@@ -119,12 +125,21 @@
 
     captureKeys: false,
     gyro: false,
-    tilt: 0,
-    enableGyro: function (on) {
+    tilt: 0, rawTilt: 0, neutral: 0, steerTilt: 0, gyroAvailable: false,
+    /** Current phone angle becomes "straight ahead". */
+    calibrate: function () { this.neutral = this.rawTilt || 0; this.steerTilt = 0; return this.neutral; },
+    /** Optional gyro; falls back to the touch buttons when unsupported or permission is denied. cb(ok) */
+    enableGyro: function (on, cb) {
+      var self = this;
       this.gyro = !!on;
-      if (on && window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().catch(function () {});
-      }
+      if (!on) { if (cb) cb(false); return; }
+      if (!window.DeviceOrientationEvent) { this.gyro = false; if (cb) cb(false); return; }
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(function (r) {
+          if (r !== 'granted') self.gyro = false;
+          if (cb) cb(self.gyro);
+        }).catch(function () { self.gyro = false; if (cb) cb(false); });
+      } else if (cb) cb(true);
     },
     on: function (name, fn) { actionHandlers[name] = fn; },
     fire: function (name, arg) { if (actionHandlers[name]) actionHandlers[name](arg); }
