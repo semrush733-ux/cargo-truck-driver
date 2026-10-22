@@ -37,18 +37,7 @@ jobs:
         run: npx cap add android
 
       - name: Landscape, fullscreen, app icon
-        run: |
-          set -x
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /' "$MANIFEST"
-          grep -n "screenOrientation" "$MANIFEST"
-          MAIN=$(find android/app/src/main/java -name MainActivity.java | head -1)
-          echo "MainActivity: $MAIN"
-          cp android-overrides/MainActivity.java "$MAIN"
-          RES=android/app/src/main/res
-          rm -rf "$RES/mipmap-anydpi-v26"
-          cp -r android-overrides/res/. "$RES/"
-          ls "$RES"
+        run: python3 android-overrides/patch_android.py
 
       - name: Sync web files
         run: npx cap sync android
