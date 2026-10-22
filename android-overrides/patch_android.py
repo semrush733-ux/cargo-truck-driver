@@ -32,8 +32,9 @@ if var_file.exists():
     v = var_file.read_text()
     v = re.sub(r'compileSdkVersion\s*=\s*\d+', 'compileSdkVersion = 35', v)
     v = re.sub(r'targetSdkVersion\s*=\s*\d+', 'targetSdkVersion = 35', v)
+    v = re.sub(r'minSdkVersion\s*=\s*\d+', 'minSdkVersion = 23', v)      # Play Billing 9 needs Android 6.0+
     var_file.write_text(v)
-    print('variables.gradle: compile/target SDK 35')
+    print('variables.gradle: compile/target SDK 35, min SDK 23')
 props = pathlib.Path('android/gradle.properties')
 p = props.read_text() if props.exists() else ''
 if 'suppressUnsupportedCompileSdk' not in p:
