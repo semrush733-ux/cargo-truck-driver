@@ -26,7 +26,8 @@
     lastT = now;
     if (!(dt > 0)) dt = 0;
     if (dt > 0.05) dt = 0.05;          // clamp long frames (tab switch, GC) so physics stays stable
-    game.tick(dt);
+    if (CT.Mode3D && CT.Mode3D.active) CT.Mode3D.frame(dt);      // the 3D mode shares this one loop
+    else game.tick(dt);
   }
   function startLoop() {
     if (rafId !== null) return;
@@ -42,18 +43,20 @@
   // ---------------------------------------------------------- background / foreground
   function goBackground() {
     game.pause();
+    if (CT.Mode3D && CT.Mode3D.active) CT.Mode3D.pause();
     CT.Controls.releaseAll();
     CT.Audio.suspend();
     stopLoop();
   }
   function goForeground() {
     CT.Audio.resume();
+    if (CT.Mode3D && CT.Mode3D.active) CT.Mode3D.foreground();
     startLoop();          // the game stays on the pause screen until the player taps Resume
   }
   document.addEventListener('visibilitychange', function () { if (document.hidden) goBackground(); else goForeground(); });
   window.addEventListener('pagehide', goBackground);
   window.addEventListener('pageshow', function () { if (!document.hidden) goForeground(); });
-  window.addEventListener('blur', function () { game.pause(); });
+  window.addEventListener('blur', function () { game.pause(); if (CT.Mode3D && CT.Mode3D.active) CT.Mode3D.pause(); });
 
   // Capacitor (Android) app lifecycle, when packaged
   try {
@@ -63,6 +66,7 @@
       App.addListener('resume', goForeground);
       App.addListener('backButton', function () {
         var S = CT.Game.STATES;
+        if (CT.Mode3D && CT.Mode3D.active) { CT.Mode3D.back(); return; }
         if (game.state === S.PAUSED) game.resume();
         else if (game.isPlaying()) game.pause();
         else if (game.state === S.LEVEL_COMPLETE || game.state === S.LEVEL_FAILED) { CT.UI.hideWin(); CT.UI.hideFail(); game.toMenu(); }

@@ -1,157 +1,204 @@
 # Cargo Truck Driver
 
-A 2D side-view cargo delivery game built with HTML5 Canvas and vanilla JavaScript. No frameworks and no image files: the truck, the cranes, the warehouses and the scenery are all drawn in code.
+A cargo-delivery truck game in HTML5 + vanilla JavaScript, packaged for Android with Capacitor.
 
-**50 playable levels** in 5 chapters: Green Valley, Metro City, Sahara Run, Frozen Pass and Night Express. In every level a team of workers loads the cargo onto your truck while a timer counts down. You drive to the Delivery Hub, stop in the green zone, and the hub workers unload it.
+There are two ways to play, and both use the same save, cash, garage, missions and achievements:
 
-What the game has:
-- **Traffic.** Two lanes with cars, vans, pickups and buses. Tap **LANE** to overtake. Traffic lights must be obeyed, and running a red costs the "Safe driving" star.
-- **Challenges.** Hills (they get steeper level by level), sharp bends with speed limits (taking one too fast damages the cargo), speed bumps, snow with low grip, desert sand, night driving with headlights, and time limits from level 8.
-- **Cargo types.** Boxes, rice sacks, fruit crates, wooden crates, oil drums, gas cylinders, glass panels, fridges and steel beams. Every 3rd level is a mixed load. Heavy cargo slows acceleration, and fragile cargo takes more damage.
-- **Real speed feel.** The world moves at the speed the meter shows. High speed adds speed lines, a wider camera view, road rumble, roadside reflector posts and blurred wheels.
-- **Weaving traffic.** Cars put on their indicators and change lanes. Steer with the LEFT and RIGHT buttons.
-- **Help when stuck.** After 2 failures on a level you get EASY mode (more time, less traffic, tougher cargo). After 3 failures you get EASY+.
-- **3 camera views.** SIDE, **TPP** (behind the truck) and **FPP** (inside the cab, with the steering wheel, gauges and mirrors). The camera button is next to Pause, or press C.
-- **Bunny driver.** You can see the bunny through the side window, in the left mirror in TPP, and in the interior rear-view mirror in FPP, where it blinks. Its paws are on the steering wheel.
-- **Stars.** ★ Cargo delivered, ★ Safe driving (no crashes, no red lights, cargo ≥ 90%), ★ Fast delivery (beat the target time). The win screen shows which stars you earned and why.
-- **Garage.** Levels pay coins. Spend them on Engine (top speed from 180 km/h up to about 300 km/h), Tyres (grip), Suspension (less cargo damage) and Brakes, each with 5 levels, plus 6 paint colours.
-- **Gyro steering** (optional, in Settings). Tilt the phone left or right to change lanes.
+- **2D campaign:** 50 side-view levels on a Canvas. It has drag-and-drop or worker loading, fuel, road surfaces, potholes, traffic, weather, and cargo that can fall off and be recovered.
+- **3D mode:** real 3D built with Babylon.js 8.33.2, shipped inside the app with no internet needed. It has 6 levels:
+  - a very easy tutorial;
+  - a valley road;
+  - a river bridge with rain and mud;
+  - roadworks in the desert;
+  - a high **mountain road** with drops and no rail in places, where the truck can fall off;
+  - a snow pass with fog and ice.
+
+The 3D mode also includes:
+- the **engine-upgrade workshop** cinematic;
+- the **premium electric truck** "Volt Ranger EV", with 3 free demo drives and a one-time Google Play unlock.
+
+No ads or ad SDKs are included.
 
 ---
 
-## 1. Run it in a browser
-
-Any static web server works. Pick one:
+## 1. Run in a browser
 
 ```bash
-# Option A: Node
-npx http-server www -p 8080 -c-1
-# then open http://localhost:8080
-
-# Option B: Python
-cd www && python -m http.server 8080
+cd www
+python3 -m http.server 8080      # or: npx http-server www -p 8080 -c-1
+# open http://localhost:8080
 ```
 
-On Windows you can also copy the `www` folder into your local server (XAMPP `htdocs`, Laragon `www`, LocalWP) and open it from there.
+Open the page from a web server, not as a `file://` URL. The 3D scripts are loaded on demand.
 
-You can also double-click `www/index.html`, because the game works from `file://` too. The offline service worker only turns on when the game is served over http(s).
-
-**One-file version:** `dist/cargo-truck-driver.html` contains everything in a single file. Upload it anywhere or open it directly. To rebuild it after you change the code, run `node tools/build-single.js`.
-
-### Controls
+**3D controls:**
 
 | Action | Touch | Keyboard |
 |---|---|---|
-| Accelerate | **GAS** pedal (right) | → or D |
-| Brake / stop | **BRAKE** pedal | ← or A, Space |
-| Reverse | **REVERSE** button | ↓ or S |
-| Load / Deliver | big centre button | E or Enter |
-| Steer left / right (change lane) | **LEFT / RIGHT** buttons, or tilt the phone (gyro) | ↑ or W toggles |
-| Camera (Side / TPP / FPP) | 👁 button | C |
-| Horn | 📢 button | H |
-| Pause | ⏸ top-right | P or Esc |
+| Accelerate | GAS | W or ↑ |
+| Brake | BRAKE | S, ↓ or Space |
+| Reverse | R | R or X |
+| Steer | ◀ / ▶ | A / D or ← / → |
+| Load / Deliver / Recover | the big button | E or Enter |
+| Camera (TPP / HIGH / FPP) | camera button | C |
+| Pause | pause button | P or Esc |
+| Horn | – | H |
 
-Pedals work while you hold them and stop as soon as you let go. Multi-touch works, so you can hold brake and tap reverse at the same time.
+**Gyro steering** is optional and is set in the Pause menu:
+- an on/off switch;
+- a sensitivity slider (6–30° for full lock);
+- a CALIBRATE button that sets the current phone angle as "straight".
 
----
+On iOS the game asks for permission. If the device has no gyro, or permission is denied, the game says so and the ◀ ▶ buttons keep working.
 
-## 2. Project structure
+## 2. Files
 
-```
-cargo-truck-driver/
-├── www/                      ← the game (this is Capacitor's webDir)
-│   ├── index.html            screens: menu, HUD, pause, win, settings
-│   ├── css/style.css         all UI styling + responsive rules
-│   ├── js/storage.js         progress + settings in localStorage
-│   ├── js/audio.js           WebAudio sounds (engine, crane, chimes) — no sound files
-│   ├── js/controls.js        touch pedals (pointer capture) + keyboard
-│   ├── js/draw.js            canvas helpers, seeded RNG
-│   ├── js/truck.js           truck physics + truck artwork
-│   ├── js/cargo.js           cargo items, counting, bed physics, box artwork
-│   ├── js/workers.js         worker teams that load/unload the cargo, loading timer
-│   ├── js/world.js           sky, hills, props, warehouses, road, delivery zone
-│   ├── js/effects.js         dust, exhaust, sparkles, confetti, floating text
-│   ├── js/levels.js          level registry + config format (docs inside)
-│   ├── js/level1.js          Level 1 (tutorial) config + generates levels 2–50
-│   ├── js/garage.js          upgrades, paints, coins, truck stats
-│   ├── js/traffic.js         cars, car-following AI, traffic lights, collisions
-│   ├── js/view3d.js          TPP chase + FPP cab cameras (pseudo-3D), bunny in mirrors
-│   ├── js/game.js            state machine, update loop, camera, rendering
-│   ├── js/ui.js              DOM screens and buttons
-│   ├── js/main.js            boot, single rAF loop, pause on background
-│   ├── sw.js                 offline cache
-│   ├── manifest.webmanifest
-│   └── assets/icon-192.png, icon-512.png
-├── dist/cargo-truck-driver.html   single-file build
-├── tools/build-single.js
-├── capacitor.config.json
-└── package.json
-```
+| Folder / file | What it is |
+|---|---|
+| `www/index.html`, `css/style.css` | All screens: menu, HUDs, result popup, garage, missions, achievements, 3D level select |
+| `www/js/storage.js` | Versioned save (schema 3) with per-field validation. It adds 3D progress, the truck choice and premium demo/ownership. Old saves load fine. |
+| `www/js/rewards.js` | The only place that adds cash. Every grant is de-duplicated by a key, so one delivery can never pay twice. |
+| `www/js/progress.js` | Daily missions (the same 3 per date) and 13 achievements |
+| `www/js/garage.js` | Upgrades, paint, wheels and accessories. Also holds the engine-level table `ENGINE_LEVELS` and the 3D truck physics `truckConfig3d()`. |
+| `www/js/game.js`, `ui.js`, `world.js`, `truck.js`, `cargo.js`, `workers.js`, `traffic.js`, `levels.js` | The 2D game |
+| `www/js/load3d.js` | Loads `vendor/babylon.js` and `js3d/*` the first time a 3D feature opens, with a loading screen |
+| `www/js/store.js` | Google Play Billing (cordova-plugin-purchase, which wraps the official Play Billing Library). In a desktop browser it shows a labelled DEVELOPMENT MOCK instead. |
+| `www/js/premium.js` | Premium truck cards, demo-drive counting, showroom and purchase screen |
+| `www/js3d/levels3d.js` | 3D level **data**: road segments with turn, rise, cliff, rail and type (mud / ice / rough / bridge / narrow), plus obstacles, weather, cargo and par time |
+| `www/js3d/kit.js` | Material cache, primitives and procedural textures (no image or model files) |
+| `www/js3d/trucks3d.js` | Original low-poly trucks built in code: Classic Hauler and Volt Ranger EV |
+| `www/js3d/road3d.js` | Road, terrain, cliffs, guard rails, bridges, signs, trees, warehouses, delivery bay, rain and fog |
+| `www/js3d/drive3d.js` | Truck controller: steering, weight-dependent acceleration and braking, slopes, surfaces, sprung body, soft road edges, falling off unrailed drops |
+| `www/js3d/cargo3d.js` | 3D boxes, drag-and-drop, forklift loading and unloading, cargo inertia, damage, fall-off and recovery |
+| `www/js3d/game3d.js` | 3D level state machine, HUD, tutorial, camera, fuel, scoring, rewards, pause, restart |
+| `www/js3d/mode3d.js` | One Babylon engine for the whole app, driven by the single main loop. Handles resize, quality settings and WebGL context loss. |
+| `www/js3d/workshop3d.js` | Engine-upgrade workshop cinematic (a 7-state machine) |
+| `www/js3d/showroom3d.js` | Rotating 3D showroom for the premium truck |
+| `www/vendor/babylon.js` | Babylon.js 8.33.2 (Apache-2.0), fetched from npm by `.github/workflows/fetch-vendor.yml` |
 
-### Game states
+The **3D models are original and built from code**, so there are no missing model or texture files. They are deliberately simple low-poly models.
 
-`MAIN_MENU → LOADING → READY_TO_DRIVE → DRIVING ⇄ ARRIVED → DELIVERING → LEVEL_COMPLETE`, plus `PAUSED`, which can be entered from any play state.
+To use licensed GLB models later:
+1. Put them in `www/models/`.
+2. Add `vendor/babylonjs.loaders.min.js`.
+3. Replace the builder in `trucks3d.js` with `BABYLON.SceneLoader.ImportMeshAsync`. Keep the same API: `root`, `body`, `wheels`, `slots`, `bed`, `cabCam`.
 
-- The pedals are locked until all 3 boxes are loaded and strapped.
-- DELIVER only becomes active when the whole truck is inside the green zone, it is nearly stopped and no pedal is held.
-- The win screen fires once (it is guarded by a flag). Restart rebuilds every object from scratch.
-- A box is counted through a `Set` of ids, so the same box is never counted twice.
-- Pause freezes physics, the cranes, the timers and the particles. Moving the app to the background pauses it automatically, and the single rAF loop is guarded so it can never run twice.
+## 3. How things work
 
-### Level 1 is forgiving
+**3D Level 1 tutorial:** the truck parks at the depot. Three boxes sit on pallets beside it. You can either:
+- drag a box onto the bed (it snaps into a free slot; a wrong drop flies back with a message), or
+- tap **LOAD** and the forklift loads the rest, with a timer.
 
-The road is flat and has no obstacles. If you overshoot the zone, you just reverse back. If you hit the road-end barrier, the truck gently bounces back, the cargo shifts a little and you see a hint. You can never fail. The pause menu also has **Reset truck to start**.
+Driving stays locked until 3/3 are loaded. Then:
+1. Drive the short flat road.
+2. Stop in the green bay under "DELIVER HERE".
+3. Tap **DELIVER**. The forklift unloads, then the result screen shows the outcome.
 
----
+Level 1 cannot break cargo and has no drops.
 
-## 3. Levels and balancing
+**Mountain roads:** segments marked `cliff` have a steep drop on one side.
+- With `rail: true`, a guard rail holds the truck.
+- Without a rail, red-white posts mark the edge. If the outer wheels go over, the truck tips and falls.
+- After a fall, the truck is put back at the last safe spot. The cargo takes a knock but stays on.
+- Three falls fail the level. The same applies whether you steer with the buttons or with gyro.
 
-The `generate(n)` function in `www/js/levels.js` builds levels 2 to 50 from a fixed seed, so every player gets the same levels. Difficulty rises through each chapter and across the whole game: longer roads, steeper hills, more bends, bumps, traffic and lights, and tighter time limits. To tune the game, change the numbers in `generate()`. To hand-make a level, register a config like the one in `level1.js` with the same `id`.
+**Cargo physics:**
+- Each load is sprung to the bed. It shifts with braking, acceleration and steering; light loads shift more, and Cargo-strap upgrades hold them tighter.
+- Bumps make loads hop. Hard hits damage them according to their sensitivity: glass > fridge > box > steel.
+- Big hits can throw a load off the truck. You can **RECOVER** it when you stop next to it.
 
-All 50 levels were checked with an autopilot bot that drives the **base truck (no upgrades)**. Every level can be finished inside its time limit. A 3-star result on later levels needs clean driving, and upgrades make it easier.
+**Rewards:** each delivery grants cash once (key `l3d:<level>:<attempt>`). Missions and achievements are keyed and saved, so they can only be claimed once.
 
----
+**Engine upgrade:** in the garage, ENGINE shows a confirm screen with:
+- the price, your cash, and the benefit (+% acceleration, top speed and hill power).
 
-## 4. Android app (Capacitor)
+On confirm, the cash is taken **once** and the new level is **saved before** the cinematic starts. Repeated taps are ignored. If the app is interrupted, nothing is lost or doubled.
 
-What you need: Node 18 or newer, Android Studio with an SDK, and JDK 17.
+The workshop runs `PURCHASE_CONFIRMED → WORKSHOP_ENTERING → SHUTTER_CLOSING → ENGINE_UPGRADING (3–5 s) → SHUTTER_OPENING → TRUCK_EXITING → UPGRADE_COMPLETE`. Your own truck (model, paint, wheels and accessories) drives in. The shutter closes, steam, sparks and flashes play, then the same truck drives out. It ends with a before/after stats card. A SKIP button is available.
 
+The engine values are in `CT.Garage.ENGINE_LEVELS`. They change the real 3D driving (`truckConfig3d`); the 2D game already scales with the engine level.
+
+**Premium truck:**
+- **Demos:** TRY FREE starts a normal 3D delivery with the Volt Ranger.
+  - A demo is counted only when the truck **starts driving**, once per attempt id.
+  - Opening the garage or showroom, or restarting during loading, costs nothing.
+  - The count lives in the save and survives a progress reset, so a reset does not give free demos.
+- **Purchase screen:** after demo 3 the purchase screen opens. It shows:
+  - the **price returned by Google Play**;
+  - "One-time purchase · not a subscription";
+  - UNLOCK TRUCK, NOT NOW and RESTORE PURCHASES.
+- **Ownership:** set only from Google Play's `approved → verified → finished` events. The purchase is acknowledged by `finish()`, and ownership is re-checked on every start.
+- **Browser mock:** in a browser the mock is clearly labelled and **never** counts inside the Android app.
+
+## 4. Android (Capacitor) and Google Play
+
+The GitHub Actions workflow `.github/workflows/build-apk.yml` builds and signs `CargoTruckDriver.apk` and `.aab` on every push. It publishes them under Releases (`v1.<run>`). Each build has a higher `versionCode`, so it installs as an update.
+
+To build locally (JDK 17, Android SDK):
 ```bash
-cd cargo-truck-driver
-npm install
+npm install                 # Capacitor 6 + @capacitor/app + cordova-plugin-purchase
 npx cap add android
+python3 android-overrides/patch_android.py
 npx cap sync android
-npx cap open android        # opens Android Studio
+cd android && ./gradlew assembleRelease bundleRelease
 ```
 
-Then, in Android Studio:
+**Google Play Console setup for the premium truck (you must do this once):**
+1. Upload the `.aab` to an Internal testing track. Billing only works for apps installed from Play.
+2. Go to Monetize → Products → In-app products, and create a product with the ID **`premium_electric_truck_unlock`**:
+   - set the price to about US$0.99 (Play converts it to local prices);
+   - activate it.
+3. Go to Setup → License testing and add your Gmail as a licence tester. Test purchases are then free.
+4. Install from the testing link, then:
+   - play 3 demos;
+   - press UNLOCK TRUCK and complete the Play sheet;
+   - check that "PURCHASE SUCCESSFUL" appears.
+5. Reinstall and press RESTORE PURCHASES. The truck should come back.
+6. Also try: cancelling the sheet, a declined card, and "slow test card" (which gives a pending purchase).
 
-1. **Lock landscape.** Open `android/app/src/main/AndroidManifest.xml` and add this to the `<activity>` tag:
-   `android:screenOrientation="sensorLandscape"`
-2. **Fullscreen (optional).** In `MainActivity.java`, after `super.onCreate(...)`, hide the system bars with `WindowInsetsControllerCompat`. The game already respects safe-area insets.
-3. **App icon.** Right-click `res` → New → Image Asset, then pick `www/assets/icon-512.png`.
-4. **Test build.** Use Build → Build APK(s). The APK ends up in `android/app/build/outputs/apk/debug/`.
-5. **Play Store build.** Use Build → Generate Signed Bundle (AAB).
+The billing plugin adds the `com.android.vending.BILLING` permission.
 
-Each time you change the game code, run `npx cap sync android` again.
+## 5. Verified in this build
 
-The `@capacitor/app` plugin is already wired up in `main.js`. The game pauses when the app goes to the background, and the Android back button pauses the game, closes the win screen, or exits from the menu.
+The checks below were run in headless Chromium (software WebGL):
+- **2D:** all 50 levels pass the autopilot with the base truck.
+- **3D:** all 6 levels pass the autopilot, including the mountain and snow levels.
+- **3D loading:**
+  - a real mouse drag puts a box on the bed;
+  - a wrong drop returns the box;
+  - LOAD runs the forklift;
+  - driving stays locked until 3/3.
+- **3D driving:**
+  - falling off a drop → respawn, and the fall is counted;
+  - the gyro tilt is mapped to steering;
+  - pause freezes the game;
+  - resume, restart (a new attempt with one scene), and quitting to the menu all work, and the scenes are disposed.
+- **Rewards and saves:**
+  - delivery cash is granted once;
+  - a duplicate or negative grant is refused;
+  - a corrupt save is repaired field by field.
+- **Workshop:**
+  - all 7 states run once and in order;
+  - a triple tap charges once;
+  - with too little cash, a clear message appears and no show starts;
+  - the engine level is saved and stays after a reload;
+  - `truckConfig3d` speed and acceleration rise.
+- **Premium truck:**
+  - opening the showroom or garage costs no demo;
+  - demos count 1/2/3 when driving starts, and the same attempt is never counted twice;
+  - a 4th demo is refused;
+  - mock cancel and fail leave the truck locked;
+  - mock success unlocks, survives a reload, and is ignored inside the native app.
+- Small screen (640×360) layout checked.
 
-### Fonts offline
+## 6. Not finished / limitations
 
-The headings use *Lilita One* and *Nunito* from Google Fonts. Without internet they fall back to system fonts and everything still works. To bundle them inside the APK, download the `.woff2` files into `www/assets/fonts/`, replace the Google Fonts `<link>` in `index.html` with `@font-face` rules in `style.css`, and add the files to `sw.js`.
-
----
-
-## 5. Test checklist (all verified)
-
-- [x] All 3 boxes load. Each tap loads one box, and taps made while the crane is busy are queued.
-- [x] Driving is locked until loading and strapping are complete.
-- [x] The truck accelerates, brakes to a full stop, reverses, and coasts when you let go.
-- [x] Cargo stays on the truck for the whole tutorial road.
-- [x] The zone is detected, and DELIVER is only active inside the zone with the truck stopped.
-- [x] The win screen appears once, after the 3rd box lands on the hub dock.
-- [x] Restart returns everything to the starting state.
-- [x] Progress (completed, 3 stars, best time) survives a reload.
-- [x] Touch pedals and keyboard both work. Pause/resume, auto-pause on background, P and Esc keys all work.
-- [x] No JavaScript errors in desktop, phone-landscape, phone-portrait or single-file runs.
+- **Not yet tested on a real Android phone.** The 3D loop works in a desktop browser; the APK's 3D performance and the Play purchase still have to be checked on a device.
+- **Google Play Billing:**
+  - It needs the Play Console product above and a Play-installed build.
+  - Without it the truck stays locked and the screen says the store is unavailable.
+  - Purchases are verified on the device by the Play Billing library; there is no own receipt-validation server. Add a server validator for stronger anti-fraud.
+- The 3D trucks, forklift and buildings are simple low-poly placeholder models, not high-detail licensed assets.
+- The 3D mode has 6 levels and **no traffic yet**. The 2D campaign has the 50 levels with traffic.
+- The premium truck drives only in the 3D mode. The 2D side view always uses the classic truck art. Paint is not applied to the steel Volt body.
+- Gyro calibration and sensitivity were tested with simulated tilt events, not on a real device.

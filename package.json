@@ -1,7 +1,7 @@
 {
   "name": "cargo-truck-driver",
   "version": "1.0.0",
-  "description": "2D cargo truck delivery game (HTML5 Canvas + vanilla JS), ready for Capacitor Android packaging.",
+  "description": "Cargo truck delivery game: 2D side-view campaign + Babylon.js 3D mode (HTML5 + vanilla JS), packaged for Android with Capacitor.",
   "private": true,
   "scripts": {
     "start": "npx http-server www -p 8080 -c-1",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@capacitor/core": "^6.1.2",
     "@capacitor/android": "^6.1.2",
-    "@capacitor/app": "^6.0.1"
+    "@capacitor/app": "^6.0.1",
+    "cordova-plugin-purchase": "^13.11.0"
   }
 }

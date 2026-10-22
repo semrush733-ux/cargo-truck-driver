@@ -40,6 +40,21 @@
 
   var THEME_GRIP = { country: 1, city: 1, desert: 0.8, snow: 0.6, night: 0.95 };
 
+  /** Engine upgrade effect per level (index = engine level 0..5). Multipliers on the truck's base values; edit freely.
+      Lv1 better acceleration, Lv2 higher top speed, Lv3 stronger on hills, Lv4/5 advanced engine. */
+  var ENGINE_LEVELS = [
+    { accel: 1.00, top: 1.00, hill: 1.00, label: 'Standard engine' },
+    { accel: 1.10, top: 1.03, hill: 1.05, label: 'Improved acceleration' },
+    { accel: 1.15, top: 1.10, hill: 1.10, label: 'Higher top speed' },
+    { accel: 1.20, top: 1.14, hill: 1.30, label: 'Stronger on hills' },
+    { accel: 1.30, top: 1.20, hill: 1.38, label: 'Advanced engine' },
+    { accel: 1.40, top: 1.26, hill: 1.45, label: 'Racing-spec engine' }
+  ];
+  var BASE3D = {
+    classic: { top: 110, accel: 3.0, brake: 8.5, revTop: 20, wheelbase: 5.2, steerMax: 0.55, mass: 1.0, electric: false },
+    volt:    { top: 135, accel: 4.1, brake: 9.8, revTop: 24, wheelbase: 4.5, steerMax: 0.6, mass: 0.85, electric: true }
+  };
+
   function find(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return list[0]; }
 
   CT.Garage = {
@@ -123,6 +138,25 @@
       };
       if (level.truck && level.truck.maxSpeedCap) cfg.maxSpeed = Math.min(cfg.maxSpeed, level.truck.maxSpeedCap);
       return cfg;
+    },
+
+    ENGINE_LEVELS: ENGINE_LEVELS,
+    BASE3D: BASE3D,
+    engineEffect: function (lvl) { return ENGINE_LEVELS[Math.max(0, Math.min(ENGINE_LEVELS.length - 1, lvl | 0))]; },
+    /** 3D driving values (metres, seconds) for a truck model, its upgrades and the level's surface/weather. */
+    truckConfig3d: function (kind, level, upgrades) {
+      var u = Object.assign({ engine: 0, brakes: 0, tyres: 0, suspension: 0, stability: 0, fuel: 0 }, upgrades || CT.Storage.getUpgrades());
+      var b = BASE3D[kind] || BASE3D.classic, e = this.engineEffect(u.engine);
+      var grip = Math.min(1.05, (THEME_GRIP[(level && level.theme) || 'country'] || 1) + u.tyres * 0.085);
+      if (level && level.weather === 'rain') grip *= 0.88;
+      return {
+        kind: kind, electric: b.electric,
+        top: b.top * e.top / 3.6, accel: b.accel * e.accel, hill: e.hill,
+        brake: b.brake * (1 + u.brakes * 0.1), revTop: b.revTop / 3.6,
+        wheelbase: b.wheelbase, steerMax: b.steerMax, mass: b.mass,
+        grip: grip, tyres: u.tyres, damageMult: 1 - u.suspension * 0.13, suspension: u.suspension,
+        stability: u.stability, fuelCapacity: 100 * (1 + u.fuel * 0.15)
+      };
     },
 
     kmh: function (unitsPerSecond) { return unitsPerSecond * CT.Levels.METERS_PER_UNIT * 3.6; }

@@ -25,7 +25,7 @@
     g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     o.connect(g); g.connect(musicBus); o.start(t0); o.stop(t0 + dur + 0.05);
   }
-  var engine = null;
+  var engine = null, engineType = 'diesel';
   var noiseBuf = null;
 
   function settingOn(k) { return CT.Storage.getSetting(k) !== false; }
@@ -94,6 +94,13 @@
     squeal: function (t) { noise(t, 0.45, 0.18, 2600, 9, 'bandpass'); tone('sawtooth', 1300, 1100, t, 0.4, 0.03); },
     fail: function (t) { [523, 440, 349, 262].forEach(function (f, i) { tone('triangle', f, f * 0.97, t + i * 0.18, 0.3, 0.2); }); },
     coin: function (t) { tone('square', 988, 988, t, 0.06, 0.1); tone('square', 1319, 1319, t + 0.06, 0.18, 0.1); },
+    shutter: function (t) { noise(t, 2.2, 0.25, 160, 0.7, 'lowpass'); for (var i = 0; i < 16; i++) tone('square', 90, 70, t + i * 0.13, 0.05, 0.05); },
+    weld: function (t) { for (var i = 0; i < 6; i++) noise(t + i * 0.07 + Math.random() * 0.04, 0.06, 0.3, 3200 + Math.random() * 2400, 2, 'bandpass'); },
+    wrench: function (t) { tone('square', 1800, 1700, t, 0.05, 0.08); tone('square', 2400, 2300, t + 0.09, 0.05, 0.06); noise(t, 0.08, 0.2, 2500, 4); },
+    rev: function (t) { tone('sawtooth', 50, 140, t, 0.7, 0.18); tone('square', 25, 70, t, 0.7, 0.1); tone('sawtooth', 140, 70, t + 0.7, 0.5, 0.12); },
+    evRev: function (t) { tone('sine', 220, 1400, t, 0.9, 0.12); tone('triangle', 440, 2800, t, 0.9, 0.05); },
+    complete: function (t) { tone('square', 880, 880, t, 0.08, 0.1); [523, 659, 784, 1047].forEach(function (f, i) { tone('triangle', f, f, t + 0.12 + i * 0.1, 0.3, 0.22); }); },
+    unlock: function (t) { [784, 988, 1175, 1568, 1976].forEach(function (f, i) { tone('triangle', f, f * 1.01, t + i * 0.07, 0.35, 0.18); }); noise(t, 0.6, 0.08, 6000, 1, 'highpass'); },
     reverse: function (t) { tone('square', 1250, 1250, t, 0.16, 0.08); },
     lowfuel: function (t) { tone('triangle', 440, 440, t, 0.15, 0.18); tone('triangle', 440, 440, t + 0.22, 0.15, 0.18); },
     invalid: function (t) { tone('square', 220, 160, t, 0.18, 0.12); },
@@ -128,26 +135,41 @@
       if (!ctx || engine || !settingOn('sound') || !settingOn('engine')) return;
       var o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lfo = ctx.createOscillator();
       var lfoGain = ctx.createGain(), filt = ctx.createBiquadFilter(), g = ctx.createGain();
-      o1.type = 'sawtooth'; o2.type = 'square';
-      o1.frequency.value = 42; o2.frequency.value = 21;
-      lfo.frequency.value = 9; lfoGain.gain.value = 0.25;
-      filt.type = 'lowpass'; filt.frequency.value = 380; filt.Q.value = 3;
+      var ev = engineType === 'ev';
+      o1.type = ev ? 'sine' : 'sawtooth'; o2.type = ev ? 'triangle' : 'square';
+      o1.frequency.value = ev ? 180 : 42; o2.frequency.value = ev ? 362 : 21;
+      lfo.frequency.value = ev ? 3 : 9; lfoGain.gain.value = ev ? 0.06 : 0.25;
+      filt.type = ev ? 'bandpass' : 'lowpass'; filt.frequency.value = ev ? 900 : 380; filt.Q.value = ev ? 1.2 : 3;
       g.gain.value = 0.5;
       lfo.connect(lfoGain); lfoGain.connect(g.gain);
       o1.connect(filt); o2.connect(filt); filt.connect(g); g.connect(engineBus);
       o1.start(); o2.start(); lfo.start();
-      engine = { o1: o1, o2: o2, lfo: lfo, filt: filt, g: g };
+      engine = { o1: o1, o2: o2, lfo: lfo, filt: filt, g: g, ev: ev };
       engineBus.gain.setTargetAtTime(0.16, ctx.currentTime, 0.2);
     },
     engineSet: function (speedRatio, throttle) {
       if (!engine) return;
       var t = ctx.currentTime;
+      if (engine.ev) {                                  // electric motor: a smooth rising whine, no rumble
+        var fe = 160 + speedRatio * 980 + throttle * 60;
+        engine.o1.frequency.setTargetAtTime(fe, t, 0.1);
+        engine.o2.frequency.setTargetAtTime(fe * 2.01, t, 0.1);
+        engine.filt.frequency.setTargetAtTime(700 + speedRatio * 1600, t, 0.1);
+        engineBus.gain.setTargetAtTime(0.05 + throttle * 0.05 + speedRatio * 0.05, t, 0.15);
+        return;
+      }
       var f = 38 + speedRatio * 48 + throttle * 14;
       engine.o1.frequency.setTargetAtTime(f, t, 0.12);
       engine.o2.frequency.setTargetAtTime(f / 2, t, 0.12);
       engine.lfo.frequency.setTargetAtTime(8 + speedRatio * 14 + throttle * 4, t, 0.12);
       engine.filt.frequency.setTargetAtTime(320 + throttle * 520 + speedRatio * 300, t, 0.1);
       engineBus.gain.setTargetAtTime(0.11 + throttle * 0.08 + speedRatio * 0.04, t, 0.15);
+    },
+    setEngineType: function (type) {
+      type = type === 'ev' ? 'ev' : 'diesel';
+      if (type === engineType) return;
+      engineType = type;
+      if (engine) { this.engineOff(); var self = this; setTimeout(function () { self.engineOn(); }, 450); }
     },
     engineOff: function () {
       if (!engine) return;

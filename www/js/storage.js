@@ -4,9 +4,9 @@ window.CT = window.CT || {};
 (function (CT) {
   'use strict';
   var KEY = 'cargoTruckDriver.save.v1';
-  var SCHEMA = 2;
+  var SCHEMA = 3;
 
-  var DEFAULT_SETTINGS = { sound: true, music: true, engine: true, vibrate: true, gyro: false, gyroSens: 15, camera: 'side' };
+  var DEFAULT_SETTINGS = { sound: true, music: true, engine: true, vibrate: true, gyro: false, gyroSens: 15, camera: 'side', cam3d: 'chase', lowFx: false, gyroNeutral: 0 };
   var UPGRADE_KEYS = ['engine', 'tyres', 'suspension', 'brakes', 'stability', 'fuel'];
   var STAT_KEYS = ['deliveries', 'perfect', 'noLoss', 'itemsDelivered', 'itemsLost', 'distanceM', 'upgradesBought', 'crashes', 'starsEarned', 'levelsFailed', 'cosmeticsBought'];
 
@@ -30,7 +30,10 @@ window.CT = window.CT || {};
       stats: {},
       achievements: {},          // id -> unlock timestamp (ms)
       missions: { date: '', progress: {}, claimed: {} },
-      rewardKeys: {}             // dedupe keys for one-off rewards
+      rewardKeys: {},            // dedupe keys for one-off rewards
+      levels3d: {},              // progress in the 3D mode (separate level list)
+      truck: 'classic',          // selected truck model: classic | volt (premium electric)
+      premium: { demoUsed: 0, demoIds: [], owned: false, source: '', ownedAt: 0 }
     };
     UPGRADE_KEYS.forEach(function (k) { d.upgrades[k] = 0; });
     STAT_KEYS.forEach(function (k) { d.stats[k] = 0; });
@@ -47,6 +50,9 @@ window.CT = window.CT || {};
       d.settings.engine = bool(s.engine, true); d.settings.vibrate = bool(s.vibrate, true);
       d.settings.gyro = bool(s.gyro, false); d.settings.gyroSens = num(s.gyroSens, 15, 6, 30);
       d.settings.camera = ['side', 'chase', 'cab'].indexOf(s.camera) >= 0 ? s.camera : 'side';
+      d.settings.cam3d = ['chase', 'far', 'cab'].indexOf(s.cam3d) >= 0 ? s.cam3d : 'chase';
+      d.settings.lowFx = bool(s.lowFx, false);
+      d.settings.gyroNeutral = num(s.gyroNeutral, 0, -60, 60);
     }
     if (isObj(p.levels)) {
       Object.keys(p.levels).forEach(function (id) {
@@ -75,6 +81,21 @@ window.CT = window.CT || {};
       if (isObj(p.missions.claimed)) Object.keys(p.missions.claimed).forEach(function (k) { if (p.missions.claimed[k] === true) d.missions.claimed[k] = true; });
     }
     if (isObj(p.rewardKeys)) Object.keys(p.rewardKeys).forEach(function (k) { if (p.rewardKeys[k]) d.rewardKeys[k] = 1; });
+    if (isObj(p.levels3d)) Object.keys(p.levels3d).forEach(function (id) {
+      var l = p.levels3d[id];
+      if (!isObj(l) || !(Number(id) >= 1 && Number(id) <= 99)) return;
+      d.levels3d[id] = { completed: bool(l.completed, false), stars: num(l.stars, 0, 0, 3), bestTime: l.bestTime == null ? null : num(l.bestTime, null, 0), plays: num(l.plays, 0, 0) };
+    });
+    if (isObj(p.premium)) {
+      var pr = p.premium;
+      d.premium.demoUsed = Math.floor(num(pr.demoUsed, 0, 0, 3));
+      d.premium.demoIds = strArr(pr.demoIds, []).slice(-10);
+      d.premium.owned = bool(pr.owned, false);
+      d.premium.source = pr.source === 'play' || pr.source === 'mock' ? pr.source : '';
+      d.premium.ownedAt = num(pr.ownedAt, 0, 0);
+      if (!d.premium.source) d.premium.owned = false;
+    }
+    d.truck = p.truck === 'volt' ? 'volt' : 'classic';
     return d;
   }
 
@@ -164,9 +185,43 @@ window.CT = window.CT || {};
     getMissions: function () { return data.missions; },
     setMissions: function (m) { data.missions = m; write(); },
 
+    // ---- 3D mode progress
+    getLevel3d: function (id) { return data.levels3d[id] || null; },
+    completeLevel3d: function (id, result) {
+      var prev = data.levels3d[id] || {};
+      var isBest = !prev.bestTime || result.time < prev.bestTime;
+      var newStars = Math.max(0, result.stars - (prev.stars || 0));
+      data.levels3d[id] = { completed: true, stars: Math.max(prev.stars || 0, result.stars), bestTime: isBest ? result.time : prev.bestTime, plays: (prev.plays || 0) + 1 };
+      write();
+      return { isBest: isBest && !!prev.bestTime, firstTime: !prev.completed, newStars: newStars };
+    },
+    totalStars3d: function () { var s = 0; for (var k in data.levels3d) s += data.levels3d[k].stars || 0; return s; },
+
+    // ---- truck choice + premium truck (demo drives and ownership)
+    getTruck: function () { return data.truck; },
+    setTruck: function (t) { data.truck = t === 'volt' ? 'volt' : 'classic'; write(); },
+    getPremium: function () { return clone(data.premium); },
+    /** Counts one demo drive per attempt id (a repeated call with the same id never counts twice). */
+    useDemo: function (attemptId) {
+      var pr = data.premium;
+      if (pr.demoIds.indexOf(attemptId) >= 0) return pr.demoUsed;
+      if (pr.demoUsed >= 3) return pr.demoUsed;
+      pr.demoUsed += 1; pr.demoIds.push(attemptId); pr.demoIds = pr.demoIds.slice(-10);
+      write(); return pr.demoUsed;
+    },
+    setPremiumOwned: function (source) {
+      var pr = data.premium;
+      if (pr.owned && pr.source === 'play') return;            // a verified Play purchase is never downgraded
+      pr.owned = true; pr.source = source; pr.ownedAt = pr.ownedAt || Date.now(); write();
+    },
+
+    /** Deletes progress, cash and upgrades. Keeps settings and a verified Play Store purchase (that belongs to the Google account). */
     resetProgress: function () {
-      var settings = data.settings;
-      data = defaults(); data.settings = settings; write();
+      var settings = data.settings, prem = data.premium;
+      data = defaults(); data.settings = settings;
+      if (prem.owned && prem.source === 'play') { data.premium.owned = true; data.premium.source = 'play'; data.premium.ownedAt = prem.ownedAt; }
+      data.premium.demoUsed = prem.demoUsed; data.premium.demoIds = prem.demoIds;   // a reset does not hand out new free demos
+      write();
     },
     reload: function () { data = read(); },
     _raw: function () { return data; }
