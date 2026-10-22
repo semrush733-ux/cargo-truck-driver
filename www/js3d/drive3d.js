@@ -169,6 +169,12 @@
     this.pitchV -= amount * 0.4;
   };
 
+  /** Moves the truck along the road to s, keeping its lane and heading relative to the road. */
+  Drive.prototype.pushTo = function (s) {
+    var f0 = this.road.at(this.s), f = this.road.at(s), rel = this.yaw - f0.h;
+    this.s = s; this.x = f.x + f.rx * this.lat; this.z = f.z + f.rz * this.lat; this.y = f.y; this.yaw = f.h + rel;
+    this.place();
+  };
   Drive.prototype.stop = function () { this.v = 0; this.throttle = 0; this.rev = 0; };
 
   CT.Drive3D = Drive;

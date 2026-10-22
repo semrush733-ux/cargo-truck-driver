@@ -4,8 +4,11 @@ A 3D cargo-delivery truck game in HTML5 + JavaScript with Babylon.js 8.33.2, pac
 
 - **The whole game is 3D.**
   - The menu shows a live 3D scene, and PLAY opens the 3D game.
-  - There are **30 levels in 5 chapters**: Green Valley, Mountain Pass, City Streets, Desert Run and Snow Peaks.
-  - Levels have mountain roads with drops, bridges, mud, ice, roadworks, potholes, speed bumps, rain, fog and **traffic** (cars, vans and buses going your way, and oncoming cars).
+  - There are **50 hand-designed levels in 5 chapters of 10**: Green Valley, Forests & Lakes, Big City, Mountains & Canyons and Snow Peaks. Each level has its own name, map shape, scenery, time of day, weather and mission, and they get harder level by level (longer roads, more traffic, tighter time, fewer guard rails).
+  - **Scenery themes:** farmland, pine and autumn forests, lakeside and sea coast roads with water, a city with buildings and street lamps, red canyons, desert, and snow.
+  - **Time of day:** day, sunset (painted sky, orange light) and night (stars, moon, street lamps and real truck headlights). Weather: clear, rain and fog.
+  - **Challenges:** traffic lights (a red light is a violation), railway crossings with barriers and a real train, toll gates (stop and wait for the arm), fallen trees, boulders and broken-down vans blocking a lane, cows, goats or reindeer crossing, fuel stations (refuel when stopped in the bay), tunnels, cone slaloms, roadworks, bridges, mud, ice, potholes, speed bumps and mountain drops, plus **traffic** that also stops at lights, trains and animals and steers around blocked lanes.
+  - **Missions:** a card at the start lists the level's rules: time limit, minimum cargo condition, a crash limit, no red lights, no falls, or start with an almost empty tank.
 - **Realistic look:**
   - physically based (PBR) paint, chrome and glass;
   - real sky photos with image-based lighting and ACES tone mapping;
@@ -67,14 +70,15 @@ On iOS the game asks for permission. If the device has no gyro, or permission is
 | `www/js/load3d.js` | Loads `vendor/babylon.js` and `js3d/*` the first time a 3D feature opens, with a loading screen |
 | `www/js/store.js` | Google Play Billing (cordova-plugin-purchase, which wraps the official Play Billing Library). In a desktop browser it shows a labelled DEVELOPMENT MOCK instead. |
 | `www/js/premium.js` | Premium truck cards, demo-drive counting, showroom and purchase screen |
-| `www/js3d/levels3d.js` | 3D level **data** and generator. The tutorial is hand-made; levels 2–30 are generated from a seed per level and chapter. Segments carry turn, rise, cliff, rail and type; levels also set obstacles, weather, traffic density, cargo, par and time limit. |
+| `www/js3d/levels3d.js` | 3D level **data**: a table of 50 levels (name, theme, time, weather, road plan, features, mission rule, cargo, story line). The road shape is built from the plan (flat, highway, hills, curvy, coast, canyon, descent, mountain, steep) with difficulty rising from level 2 to 50. |
+| `www/js3d/hazards3d.js` | Special challenges: traffic lights, railway crossings with trains, toll gates, lane blockers, animal herds and fuel stations. Builds them, animates them, checks the truck against them and tells the hints, traffic and autopilot where to stop. |
 | `www/js3d/traffic3d.js` | Traffic: cars, SUVs, vans and buses. Same-way traffic is slower than you; oncoming traffic uses the left lane. Cars keep their distance, brake for the truck, show brake lights and honk, and collisions count as crashes. |
 | `www/js3d/humans3d.js` | People built from capsules: seated driver and operator, and walking or waving depot workers |
 | `www/js3d/menu3d.js` | 3D menu backdrop and the live 3D truck preview in the garage |
 | `www/assets/` | CC0 textures (Poly Haven) and HDRI skies, resized for phones (about 3.5 MB). See `assets/LICENSE-assets.txt`. |
 | `www/js3d/kit.js` | Material cache, primitives and procedural textures (no image or model files) |
 | `www/js3d/trucks3d.js` | Original low-poly trucks built in code: Classic Hauler and Volt Ranger EV |
-| `www/js3d/road3d.js` | Road, terrain, cliffs, guard rails, bridges, signs, trees, warehouses, delivery bay, rain and fog |
+| `www/js3d/road3d.js` | Road, terrain per theme, cliffs, guard rails, bridges, tunnels, lake/sea water, city buildings, trees, signs, warehouses, delivery bay, sky for day/sunset/night, night street lamps, rain and fog |
 | `www/js3d/drive3d.js` | Truck controller: steering, weight-dependent acceleration and braking, slopes, surfaces, sprung body, soft road edges, falling off unrailed drops |
 | `www/js3d/cargo3d.js` | 3D boxes, drag-and-drop, forklift loading and unloading, cargo inertia, damage, fall-off and recovery |
 | `www/js3d/game3d.js` | 3D level state machine, HUD, tutorial, camera, fuel, scoring, rewards, pause, restart |
@@ -169,7 +173,7 @@ The billing plugin adds the `com.android.vending.BILLING` permission.
 
 The checks below were run in headless Chromium (software WebGL):
 - **2D:** all 50 levels pass the autopilot with the base truck.
-- **3D:** all 6 levels pass the autopilot, including the mountain and snow levels.
+- **3D:** all 50 levels pass the autopilot with traffic on (it stops for red lights, trains, toll gates and animals, refuels, weaves through cone slaloms and passes blocked lanes), with no red lights run.
 - **3D loading:**
   - a real mouse drag puts a box on the bed;
   - a wrong drop returns the box;

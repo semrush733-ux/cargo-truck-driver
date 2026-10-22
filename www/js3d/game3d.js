@@ -137,7 +137,7 @@
     if (this.demo) this.kind = 'volt';
     this.attemptId = '3d-' + L.id + '-' + (++attemptSeq) + '-' + Date.now();
     var env = CT.Mode3D.newScene();
-    this.scene = env.scene; this.kit = env.kit; this.sun = env.sun;
+    this.scene = env.scene; this.kit = env.kit; this.sun = env.sun; this.hemi = env.hemi;
     this.road = new CT.Road3D(this.scene, this.kit, L);
     this.road.build();
     this.truck = CT.Trucks3D.build(this.kit, this.kind);
@@ -149,15 +149,19 @@
     this.cargo.stability = this.cfg.stability;
     this.cargo.setupDock(this.drive);
     this.crowds = [new CT.Humans3D.Crowd(this.kit, this.road, this.road.startS), new CT.Humans3D.Crowd(this.kit, this.road, (this.road.zone.s1 + this.road.zone.s2) / 2, { seed: 3 })];
+    this.hazards = CT.Hazards3D ? new CT.Hazards3D(this) : null;
     this.traffic = L.traffic && CT.Traffic3D ? new CT.Traffic3D(this, { density: L.traffic.density * (1 - 0.3 * this.assist) }) : null;
     if (this.kit.shadowGen) this.kit.shadowGen.getShadowMap().refreshRate = this.kit.lowFx ? 2 : 1;
     this.camera = new B.FreeCamera('cam', new V3(0, 8, -12), this.scene);
     this.camera.minZ = 0.3; this.camera.maxZ = 1800;
     this.scene.activeCamera = this.camera;
-    this.kit.environment(this.road.skyName(), { camera: this.camera, exposure: this.level.weather === 'clear' ? 1.05 : 1.2 });
+    this.road.setupSky(this.camera, this.sun, this.hemi);
+    if (this.road.night) this.headlights();
     this.camMode = CAMS.indexOf(CT.Storage.getSetting('cam3d')) >= 0 ? CT.Storage.getSetting('cam3d') : 'chase';
     this.camPos = null; this.camLook = null;
     this.fuelMax = this.cfg.fuelCapacity; this.fuel = this.fuelMax;
+    this.rule = L.rule || {}; this.reds = 0;
+    if (this.rule.lowFuel) this.fuel = this.fuelMax * (0.34 + 0.08 * this.assist);
     this.t = 0; this.time = 0; this.stateTime = 0;
     this.crashes = 0; this.falls = 0; this.safeS = this.road.startS; this.lastSafe = 0;
     this.health = 100; this.timers = []; this.flags = {}; this.paused = false; this.prevState = null;
@@ -196,6 +200,78 @@
     CT.UI.resultOwner = '3d';
     CT.Audio.setEngineType && CT.Audio.setEngineType(this.cfg.electric ? 'ev' : 'diesel');
     if (this.assist) this.toast(this.assist > 1 ? 'Easy mode+: more time, softer cargo damage' : 'Easy mode: more time and softer cargo damage', 'info');
+    this.missionCard();
+  };
+
+  /** Mission card shown while loading: the level's story, its rules and the challenges on the road. */
+  Game3D.prototype.missionLines = function () {
+    var R = this.rule, out = [];
+    if (this.timeLimit) out.push('⏱ Deliver within ' + CT.UI.fmtTime(this.timeLimit));
+    if (R.minCond) out.push('📦 Cargo must arrive at ' + R.minCond + '% condition or better');
+    if (R.maxCrash != null) out.push(R.maxCrash === 0 ? '💥 No crashes allowed' : '💥 At most ' + R.maxCrash + ' crash' + (R.maxCrash > 1 ? 'es' : ''));
+    if (R.noRed) out.push('🚦 Never run a red light');
+    if (R.noFall) out.push('⛰ Do not fall off the road');
+    if (R.lowFuel) out.push(this.cfg.electric ? '🔋 Battery is low: charge at the station' : '⛽ Tank is almost empty: refuel at the station');
+    return out.concat(this.hazards ? this.hazards.summary() : []);
+  };
+  Game3D.prototype.missionCard = function () {
+    var L = this.level, el = $('h3Mission');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'h3Mission'; el.className = 'h3-mission';
+      el.innerHTML = '<div class="hm-ch" id="hmCh"></div><div class="hm-title" id="hmTitle"></div><div class="hm-blurb" id="hmBlurb"></div><ul id="hmList"></ul><button type="button" class="btn btn-green btn-small" id="hmOk">OK</button>';
+      hud.root.appendChild(el);
+      $('hmOk').addEventListener('click', function () { CT.Audio.play('click'); el.hidden = true; });
+    }
+    if (L.tutorial) { el.hidden = true; return; }
+    $('hmCh').textContent = (L.chapter ? L.chapter + ' · ' : '') + 'Level ' + L.id;
+    $('hmTitle').textContent = L.name;
+    $('hmBlurb').textContent = L.blurb || '';
+    var lines = this.missionLines();
+    $('hmList').innerHTML = lines.length ? lines.map(function (t) { return '<li>' + t + '</li>'; }).join('') : '<li>Deliver the cargo safely</li>';
+    el.hidden = false;
+    clearTimeout(this._misTimer);
+    this._misTimer = setTimeout(function () { el.hidden = true; }, 30000);   // also closes when driving starts
+  };
+
+  /** Night driving: real headlights on the truck. */
+  Game3D.prototype.headlights = function () {
+    var sc = this.scene, self = this, n = this.truck.halfLen;
+    this.lights = [-0.8, 0.8].map(function (x) {
+      var sp = new B.SpotLight('head', new V3(x, 1.2, n), new V3(0, -0.12, 1), 0.9, 3, sc);
+      sp.parent = self.truck.body; sp.diffuse = new B.Color3(1, 0.95, 0.82); sp.intensity = 260; sp.range = 70;
+      return sp;
+    });
+  };
+
+  /** A hazard crash (train, barrier, gate, blocker, animals): it counts as a crash and the truck is pushed back to a safe spot. */
+  Game3D.prototype.hazardCrash = function (v, msg, backS) {
+    if (this.state === ST.FAILED || this.state === ST.COMPLETE) return;
+    var d = this.drive;
+    if (this.t - (this.flags.hzT || -9) > 1.2) { this.flags.hzT = this.t; this.crash(Math.max(2.6, v), msg); this.checkRules(); }
+    if (backS != null) d.pushTo(backS);
+    d.stop();
+  };
+  Game3D.prototype.onRedLight = function () {
+    this.reds++;
+    CT.Audio.play('invalid'); CT.vibrate([60, 40, 60]);
+    if (this.rule.noRed) this.fail('Ran a red light', 'This mission does not allow red lights. Slow down early when the light turns yellow and stop at the white line.');
+    else this.toast('You ran a red light! Stop at the line next time', 'bad');
+  };
+  Game3D.prototype.refuel = function (o) {
+    if (this.fuel >= this.fuelMax - 0.01) { if (!this.flags.fullT || this.t - this.flags.fullT > 4) { this.flags.fullT = this.t; } return; }
+    var was = this.fuel;
+    this.fuel = Math.min(this.fuelMax, this.fuel + this.fuelMax * 0.35 * (this.lastDt || 0.016));
+    this.drive.noPower = false; this.flags.fuelWarn = false; this.flags.noFuelT = 0;
+    if (was < this.fuelMax * 0.2 || !this.flags.refuelMsg) { if (!this.flags.refuelMsg) { this.flags.refuelMsg = true; CT.Audio.play('pickup'); this.toast(this.cfg.electric ? 'Charging… stay stopped' : 'Refuelling… stay stopped', 'good'); } }
+    if (this.fuel >= this.fuelMax - 0.01) { CT.Audio.play('coin'); this.toast(this.cfg.electric ? 'Battery full!' : 'Tank full!', 'good'); }
+  };
+  /** Mission rules that end the level as soon as they are broken. */
+  Game3D.prototype.checkRules = function () {
+    var R = this.rule;
+    if (this.state === ST.FAILED || this.state === ST.COMPLETE || this.level.tutorial) return;
+    if (R.maxCrash != null && this.crashes > R.maxCrash) this.fail('Too many crashes', R.maxCrash === 0 ? 'This mission allows no crashes at all. Keep your distance and slow down.' : 'This mission allows only ' + R.maxCrash + ' crash' + (R.maxCrash > 1 ? 'es' : '') + '. Drive carefully.');
+    else if (R.minCond && this.cargo.condition() < R.minCond) this.fail('Cargo damaged', 'The cargo must stay at ' + R.minCond + '% condition or better. Slow down for bumps and bends.');
+    else if (R.noFall && this.falls > 0) this.fail('Fell off the road', 'This mission does not allow a single fall. Slow down before bends and keep away from the edge.');
   };
 
   Game3D.prototype.wireEvents = function () {
@@ -241,7 +317,7 @@
     hud.root.classList.toggle('locked', !drive);
     if (drive || s === ST.DELIVERING) CT.Audio.engineOn(); else CT.Audio.engineOff();
     if (s === ST.READY && old === ST.LOADING) { CT.Audio.play('ready'); var me = this; setTimeout(function () { CT.Audio.play('horn'); }, 400); this.tutorial(2); }
-    if (s === ST.DRIVING && !this.flags.driveStarted) { this.flags.driveStarted = true; this.onDriveStarted(); }
+    if (s === ST.DRIVING && !this.flags.driveStarted) { this.flags.driveStarted = true; this.onDriveStarted(); var mc = $('h3Mission'); if (mc) mc.hidden = true; }
     if (s === ST.ARRIVED) { CT.Audio.play('zone'); CT.vibrate(30); this.tutorial(4); }
     if (s === ST.DELIVERING) this.startUnload();
     if (s === ST.LOADING) this.tutorial(1);
@@ -377,6 +453,7 @@
     this.health = this.cargo.condition();
     this.updateCargoHud(true);
     this.checkCargoFail();
+    this.checkRules();
     return res.amount;
   };
   Game3D.prototype.crash = function (v, msg) {
@@ -387,6 +464,7 @@
     this.cargo.jolt(v * 0.45, 0, 1.5);
     this.damage(4 + v * 1.2);
     this.toast(msg || 'Crash!', 'bad');
+    this.checkRules();
   };
   Game3D.prototype.checkCargoFail = function () {
     if (this.level.tutorial || this.state === ST.FAILED || this.state === ST.COMPLETE) return;
@@ -416,6 +494,7 @@
     this.cargo.items.forEach(function (it) { if (it.state === CT.Cargo3D.ST.FALLEN && !it.destroyed) { var slot = self.cargo.freeSlot(it.id); if (slot >= 0) { it.mesh.rotation.set(0, 0, 0); self.cargo.attach(it, slot); } } });
     this.health = this.cargo.condition();
     this.camPos = null;
+    if (this.rule.noFall && !this.level.tutorial) { this.checkRules(); return; }
     if (this.falls >= 3 && !this.level.tutorial) {
       this.fail('Fell off the road', 'The truck went over the edge 3 times. Slow down before bends on mountain roads and keep away from the drop. Turn the gyro sensitivity down if steering feels too quick.');
       return;
@@ -450,7 +529,8 @@
     var L = this.level, C = this.cargo, time = this.time;
     var delivered = C.deliveredCount(), lost = C.required - delivered;
     var cond = Math.round(C.items.filter(function (it) { return C.delivered[it.id]; }).reduce(function (s, it) { return s + it.health; }, 0) / Math.max(1, delivered));
-    var safe = this.crashes === 0 && this.falls === 0 && cond >= 90 && lost === 0;
+    if (this.rule.minCond && cond < this.rule.minCond && !L.tutorial) { this.fail('Cargo damaged', 'The cargo arrived at ' + cond + '% but this mission needs ' + this.rule.minCond + '%. Drive more gently.'); return; }
+    var safe = this.crashes === 0 && this.falls === 0 && cond >= 90 && lost === 0 && this.reds === 0;
     var fast = time <= this.par;
     var stars = 1 + (safe ? 1 : 0) + (fast ? 1 : 0);
     var saved = CT.Storage.completeLevel3d(L.id, { stars: stars, time: time });
@@ -458,12 +538,13 @@
     var br = CT.Rewards.levelBreakdown({ id: L.id * 2, chapter: 0 }, { safe: safe, fast: fast, lost: lost }, saved);
     var coins = CT.Rewards.grant('l3d:' + L.id + ':' + this.attemptId, br.total, false);    // one grant per attempt
     this.recordDistanceOnce();
-    CT.Progress.recordDelivery({ delivered: delivered, lost: lost, stars: stars, damagePct: 100 - cond, crashes: this.crashes, violations: 0, fast: fast });
+    CT.Progress.recordDelivery({ delivered: delivered, lost: lost, stars: stars, damagePct: 100 - cond, crashes: this.crashes, violations: this.reds, fast: fast });
     var why = [];
     if (lost) why.push(lost + ' load' + (lost > 1 ? 's' : '') + ' lost');
     if (cond < 90) why.push('cargo condition ' + cond + '% (needs 90%)');
     if (this.crashes) why.push(this.crashes + ' crash' + (this.crashes > 1 ? 'es' : ''));
     if (this.falls) why.push('fell off the road ' + this.falls + 'x');
+    if (this.reds) why.push(this.reds + ' red light' + (this.reds > 1 ? 's' : ''));
     if (!fast) why.push('slower than the ' + CT.UI.fmtTime(this.par) + ' target');
     var next = CT.Levels3D.get(L.id + 1);
     this.result = {
@@ -474,7 +555,7 @@
       explain: stars === 3 ? 'Perfect run: every load arrived safely and on time!' : 'Missed stars: ' + why.join(', ') + '.',
       criteria: [
         { ok: true, title: 'Cargo delivered', detail: delivered + '/' + C.required + (lost ? ' · ' + lost + ' lost' : '') },
-        { ok: safe, title: 'Safe driving', detail: 'Condition ' + cond + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.falls + ' fall' + (this.falls === 1 ? '' : 's') },
+        { ok: safe, title: 'Safe driving', detail: 'Condition ' + cond + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.falls + ' fall' + (this.falls === 1 ? '' : 's') + (this.reds ? ' · ' + this.reds + ' red' : '') },
         { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(this.par) + ')' }
       ],
       hasNext: !!next
@@ -524,12 +605,14 @@
       var moved = d.update(dt, inp);
       if (!ended && (s === ST.READY || s === ST.DRIVING || s === ST.ARRIVED)) {
         this.checkRoad(prevS, d.s);
+        if (this.hazards) this.hazards.check(prevS, d.s);
         this.updateFuel(dt, moved, inp);
         if (Math.abs(d.lat) < 3.2 && this.road.cliffAt(d.s) === null || Math.abs(d.lat - CT.Road3D.LANE_R) < 1.6) {
           if (d.s > this.safeS) this.safeS = d.s;            // last safe spot for a respawn
         }
       }
     }
+    if (this.hazards) this.hazards.update(dt);
     if (this.traffic) {
       this.traffic.update(dt, this.truck, d);
       if (s === ST.DRIVING || s === ST.ARRIVED || s === ST.READY) {
@@ -622,8 +705,8 @@
         self.cargo.jolt((kmh) * 0.02, 0, kmh * 0.08);
         if (kmh > 25) { self.damage((kmh - 25) * 0.3); self.toast('Pothole! Steer around it', 'warn'); }
       } else if (o.type === 'cone') {
-        if (d.lat > o.lat + 1.2 + 0.3) return;
-        if (!o.hit) { o.hit = true; d.v *= 0.6; self.damage(3 + kmh * 0.05); CT.Audio.play('bump'); self.toast('You hit the cones! Keep RIGHT', 'bad'); }
+        if (Math.abs(d.lat - o.lat) > (o.slalom ? 0.45 : 1.2) + self.truck.width / 2) return;
+        if (!o.hit) { o.hit = true; d.v *= 0.6; self.damage(3 + kmh * 0.05); CT.Audio.play('bump'); self.toast(o.slalom ? 'You hit a cone! Weave between them' : 'You hit the cones! Keep RIGHT', 'bad'); }
       }
     });
     var sec = this.road.sectionAt(d.s);
@@ -760,6 +843,9 @@
         else if (this.inZone) { key = 'rel'; t = 'Let go of the pedals'; sub = 'Stop to deliver'; }
         else if (d.s > z.s2 + 1) { key = 'over'; t = 'A little too far!'; sub = 'Hold R to back into the bay'; tone = 'warn'; }
         else if (z.s1 - d.s < 80) { key = 'near'; t = 'Stop in the green bay'; sub = 'Slow down and BRAKE'; }
+        else if (this.hazards && (this._stop = this.hazards.stopAhead(70)) && this._stop.s - (d.s + this.truck.halfLen) < 60) { key = 'hz' + this._stop.why; t = this._stop.why; sub = Math.max(0, Math.round(this._stop.s - d.s - this.truck.halfLen)) + ' m · hold BRAKE'; tone = 'warn'; }
+        else if (this.hazards && (this._blk = this.hazards.blockAhead(80)) && this._blk.dist > 0 && Math.abs(this._blk.o.lat - d.lat) < 2.5) { key = 'blk'; t = 'Lane blocked ahead!'; sub = this._blk.o.lat > 0 ? 'Pass on the LEFT when no car is coming' : 'Keep to the RIGHT lane'; tone = 'warn'; }
+        else if (this.rule.lowFuel && this.fuel < this.fuelMax * 0.5 && this.hazards && this.hazards.items.some(function (o) { return o.type === 'fuel' && o.bay.s2 > d.s; })) { key = 'fuelgo'; t = this.cfg.electric ? 'Charge at the station' : 'Refuel at the station'; sub = 'Stop in the yellow bay on the right'; tone = 'warn'; }
         else if (this.traffic && (this._ahead = this.traffic.ahead(d)) && this._ahead.d < 45 && this._ahead.car.dir > 0 && this._ahead.car.v < d.v + 1) { key = 'traffic'; t = 'Slow vehicle ahead'; sub = 'Brake, or overtake on the left when no car is coming'; tone = 'warn'; }
         else if (this.traffic && this._ahead && this._ahead.car.dir < 0 && this._ahead.d < 90) { key = 'oncoming'; t = 'Oncoming car!'; sub = 'Steer back to the RIGHT lane'; tone = 'bad'; }
         else { key = 'drive'; t = 'Drive to the ' + 'Delivery Hub'; sub = rem + ' m to go'; }
@@ -770,7 +856,7 @@
       case ST.COMPLETE: key = 'done'; t = 'DELIVERY SUCCESSFUL!'; tone = 'good'; break;
       case ST.FAILED: key = 'failed'; t = this.failInfo ? this.failInfo.title : 'Failed'; tone = 'bad'; break;
     }
-    if (key === 'drive' && this.hintKey === 'drive' && !force) { $('h3Sub').textContent = sub; return; }
+    if (key === this.hintKey && !force) { if ($('h3Sub').textContent !== sub) $('h3Sub').textContent = sub; return; }
     if (key !== this.hintKey || force) {
       var pop = key !== this.hintKey;
       this.hintKey = key;
@@ -922,7 +1008,8 @@
     var c = CT.Mode3D.canvas;
     if (this._pd) { c.removeEventListener('pointerdown', this._pd); window.removeEventListener('pointermove', this._pm, true); window.removeEventListener('pointerup', this._pu, true); window.removeEventListener('pointercancel', this._pu, true); }
     clearTimeout(this._tutTimer);
-    if (hud) { hud.root.hidden = true; hud.pause.hidden = true; $('h3Tut').hidden = true; }
+    clearTimeout(this._misTimer);
+    if (hud) { hud.root.hidden = true; hud.pause.hidden = true; $('h3Tut').hidden = true; if ($('h3Mission')) $('h3Mission').hidden = true; }
     this.timers = [];
     this.scene.dispose();
   };

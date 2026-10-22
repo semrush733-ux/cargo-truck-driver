@@ -1,10 +1,10 @@
 /* sw.js — caches the game files so it keeps working offline after the first visit. */
-var CACHE = 'cargo-truck-driver-v6';
+var CACHE = 'cargo-truck-driver-v7';
 var FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/storage.js', 'js/audio.js', 'js/controls.js', 'js/draw.js', 'js/truck.js', 'js/cargo.js', 'js/workers.js',
   'js/world.js', 'js/traffic.js', 'js/view3d.js', 'js/effects.js', 'js/levels.js', 'js/garage.js', 'js/rewards.js', 'js/progress.js', 'js/level1.js', 'js3d/levels3d.js', 'js/load3d.js', 'js/store.js', 'js/premium.js', 'js/game.js', 'js/ui.js', 'js/main.js',
-  'vendor/babylon.js', 'js3d/kit.js', 'js3d/humans3d.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/traffic3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js', 'js3d/mode3d.js', 'js3d/game3d.js', 'js3d/workshop3d.js', 'js3d/showroom3d.js', 'js3d/menu3d.js', 'js3d/humans3d.js', 'js3d/traffic3d.js',
+  'vendor/babylon.js', 'js3d/kit.js', 'js3d/humans3d.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/traffic3d.js', 'js3d/hazards3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js', 'js3d/mode3d.js', 'js3d/game3d.js', 'js3d/workshop3d.js', 'js3d/showroom3d.js', 'js3d/menu3d.js',
   'assets/icon-192.png', 'assets/icon-512.png'
 ];
 self.addEventListener('install', function (e) {

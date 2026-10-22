@@ -42,6 +42,34 @@
         pts.push({ x: x, y: y, z: z, h: h, s: s, type: seg.type || null, cliff: seg.cliff === 'L' ? -1 : seg.cliff === 'R' ? 1 : 0, wall: seg.cliff ? 1 : 0 });
       }
     });
+    // extra sections placed by distance (bridges, tunnels, mud, ice, roadworks, slalom)
+    (L.sections || []).forEach(function (sc) {
+      sections.push({ type: sc.type, s1: sc.s1, s2: sc.s2 });
+      pts.forEach(function (p) {
+        if (p.s < sc.s1 || p.s > sc.s2) return;
+        p.type = sc.type;
+        if (sc.type === 'bridge' || sc.type === 'tunnel') { p.cliff = 0; p.wall = 0; }
+      });
+    });
+    // level ground where the truck has to stop (signals, level crossings, toll, fuel, animals, blockers), so it can start again
+    (L.obstacles || []).forEach(function (o) {
+      if (!/^(light|rail|toll|fuel|herd|block)$/.test(o.type)) return;
+      var i0 = Math.round(o.s / STEP), yc = pts[Math.max(0, Math.min(pts.length - 1, i0))].y;
+      pts.forEach(function (p) {
+        var dd = Math.abs(p.s - o.s), w = dd < 28 ? 1 : dd > 70 ? 0 : 1 - smooth((dd - 28) / 42);
+        if (w > 0) p.y += (yc - p.y) * w;
+      });
+    });
+    // no grade steeper than about 11 degrees: a loaded truck must always be able to pull away
+    var MAXG = 0.2 * STEP, yPrev = pts[0].y, yOld = pts[0].y;
+    for (var gi = 1; gi < pts.length; gi++) {
+      var dy = pts[gi].y - yOld; yOld = pts[gi].y;
+      pts[gi].y = yPrev + Math.max(-MAXG, Math.min(MAXG, dy)); yPrev = pts[gi].y;
+    }
+    var canyon = L.theme === 'canyon';
+    pts.forEach(function (p) { if (canyon && p.type !== 'bridge') p.canyon = true; });
+    this.seed = (L.id || 0) * 13.37;
+    this.coastSide = L.coast === 'L' ? -1 : L.coast === 'R' ? 1 : 0;
     this.pts = pts;
     this.length = s;
     this.sections = sections;
@@ -85,6 +113,8 @@
   };
   /** Side with a drop at distance s (-1 left, 1 right, 0 none) and whether a guard rail protects it. */
   Road.prototype.cliffAt = function (s) {
+    var sec = this.sectionAt(s);
+    if (sec && (sec.type === 'bridge' || sec.type === 'tunnel')) return null;        // bridges have rails, tunnels walls
     for (var i = 0; i < this.sections.length; i++) { var sc = this.sections[i]; if (sc.type === 'cliff' && s >= sc.s1 - 3 && s <= sc.s2 + 3) return sc; }
     return null;
   };
@@ -100,6 +130,8 @@
     this.buildRoadMesh();
     this.buildTerrain();
     this.buildBridges();
+    this.buildWater();
+    this.buildTunnels();
     this.buildCliffEdges();
     this.buildObstacles();
     this.buildProps();
@@ -107,12 +139,134 @@
     this.dropDock = this.buildWarehouse((this.zone.s1 + this.zone.s2) / 2, 'DELIVERY HUB', '#2f7fe0');
     this.buildZone();
     this.buildWeather();
+    if (this.level.time === 'night') this.buildNightLamps();
+  };
+
+  /** Lake or sea beside coast roads (one big reflective plane). */
+  Road.prototype.buildWater = function () {
+    if (!this.coastSide) return;
+    var f = this.at(this.length / 2), k = this.kit;
+    var w = B.MeshBuilder.CreateGround('sea', { width: 3000, height: 3000, subdivisions: 1 }, this.scene);
+    w.position.set(f.x + f.rx * this.coastSide * 900, this.pts[0].y - 1.6, f.z + f.rz * this.coastSide * 900);
+    var frozen = this.level.theme === 'snow';
+    w.material = k.pbr(frozen ? '#c9e4f2' : '#2a6f9e', { metal: frozen ? 0.1 : 0.4, rough: frozen ? 0.25 : 0.08, env: frozen ? 1.1 : 1.6 });
+    w.isPickable = false;
+    this.meshes.push(w);
+  };
+
+  /** Tunnels: a curved concrete tube following the road, ceiling lamps, and rock portals at both ends. */
+  Road.prototype.buildTunnels = function () {
+    var self = this, k = this.kit, sc = this.scene, R = HALF + 1.4;
+    this.sections.forEach(function (sec) {
+      if (sec.type !== 'tunnel') return;
+      var paths = [];
+      for (var s = sec.s1; s <= sec.s2 + 0.01; s += STEP) {
+        var f = self.at(s), ring = [];
+        for (var i = 0; i <= 12; i++) {
+          var a = i / 12 * Math.PI, lat = Math.cos(a) * R, up = Math.sin(a) * R * 0.95;
+          ring.push(new B.Vector3(f.x + f.rx * lat, f.y + up - 0.2, f.z + f.rz * lat));
+        }
+        paths.push(ring);
+      }
+      var tube = B.MeshBuilder.CreateRibbon('tunnel', { pathArray: paths, sideOrientation: B.Mesh.DOUBLESIDE }, sc);
+      tube.material = k.surface('concrete', 3, { env: 0.25, tint: '#9aa0a8', back: true });
+      tube.receiveShadows = true; self.meshes.push(tube);
+      var lamp = B.MeshBuilder.CreateBox('tLamp', { width: 0.4, height: 0.08, depth: 1.6 }, sc);
+      lamp.material = k.pbr('#fff2c8', { emissive: '#ffe9a0', glow: 1.5 });
+      for (var s2 = sec.s1 + 4; s2 < sec.s2; s2 += 9) {
+        var fl = self.at(s2);
+        lamp.thinInstanceAdd(B.Matrix.RotationY(fl.h).multiply(B.Matrix.Translation(fl.x, fl.y + R * 0.95 - 0.35, fl.z)), false);
+      }
+      lamp.thinInstanceBufferUpdated('matrix'); lamp.thinInstanceRefreshBoundingInfo(false); lamp.alwaysSelectAsActiveMesh = true;
+      self.meshes.push(lamp);
+      [sec.s1, sec.s2].forEach(function (se, j) {
+        var fp = self.at(se), portal = B.MeshBuilder.CreateBox('portal', { width: R * 2 + 14, height: 9, depth: 3 }, sc);
+        portal.position.set(fp.x, fp.y + R * 0.95 + 3.6, fp.z); portal.rotation.y = fp.h;
+        portal.material = k.surface('cliff', 0.6, { env: 0.4, tint: self.level.theme === 'snow' ? '#c9cfd6' : self.level.theme === 'canyon' ? '#c8764a' : undefined });
+        self.meshes.push(portal);
+        var sign = k.sign('tunnelSign', 'TUNNEL', 3, 0.8, '#1d3b6f', '#ffffff', null, { glow: '#8aa0c0' });
+        sign.position.set(fp.x, fp.y + R * 0.95 + 0.6, fp.z); sign.rotation.y = fp.h + (j ? Math.PI : 0); self.meshes.push(sign);
+      });
+    });
+  };
+
+  /** Street lamps with pools of light on the road for night levels (no real lights: cheap on phones). */
+  Road.prototype.buildNightLamps = function () {
+    var k = this.kit, sc = this.scene, self = this;
+    var pole = B.MeshBuilder.CreateCylinder('nPole', { diameter: 0.16, height: 7, tessellation: 8 }, sc); pole.material = k.pbr('#3a3e47', { metal: 0.7, rough: 0.4 });
+    var bulb = B.MeshBuilder.CreateBox('nBulb', { width: 0.7, height: 0.14, depth: 0.35 }, sc); bulb.material = k.pbr('#fff4cc', { emissive: '#ffd98a', glow: 2.4 });
+    var pool = B.MeshBuilder.CreateDisc('nPool', { radius: 5.5, tessellation: 24 }, sc); pool.rotation.x = Math.PI / 2;
+    pool.material = k.pbr('#ffd27a', { emissive: '#7a5a20', alpha: 0.22, env: 0 }); pool.bakeCurrentTransformIntoVertices();
+    for (var s = 30; s < this.length - 20; s += this.level.theme === 'city' ? 28 : 45) {
+      var f = this.at(s), side = Math.round(s / 45) % 2 ? 1 : -1;
+      if (this.sectionAt(s) && this.sectionAt(s).type === 'tunnel') continue;
+      var lat = side * (HALF + 1.0), x = f.x + f.rx * lat, z = f.z + f.rz * lat;
+      pole.thinInstanceAdd(B.Matrix.Translation(x, f.y + 3.5, z), false);
+      bulb.thinInstanceAdd(B.Matrix.RotationY(f.h).multiply(B.Matrix.Translation(f.x + f.rx * side * (HALF - 0.6), f.y + 6.9, f.z + f.rz * side * (HALF - 0.6))), false);
+      pool.thinInstanceAdd(B.Matrix.Translation(f.x + f.rx * side * 1.5, f.y + 0.07, f.z + f.rz * side * 1.5), false);
+    }
+    [pole, bulb, pool].forEach(function (m) { m.thinInstanceBufferUpdated('matrix'); m.thinInstanceRefreshBoundingInfo(false); m.alwaysSelectAsActiveMesh = true; m.isPickable = false; self.meshes.push(m); });
   };
 
   /** Which real sky photo this level uses, and its haze/fog. */
   Road.prototype.skyName = function () {
     var L = this.level;
+    if (L.time === 'night') return 'overcast';
+    if (L.time === 'sunset') return 'clear';
     return L.weather === 'rain' || L.weather === 'fog' ? 'overcast' : L.theme === 'snow' ? 'clear' : 'day';
+  };
+
+  /** Painted sky dome for sunset and night (the photo skies are daytime). */
+  Road.prototype.paintedSky = function (kind) {
+    var k = this.kit, sc = this.scene;
+    var tex = k.tex('skyPaint', 2048, 1024, function (ctx, w, h) {
+      var g = ctx.createLinearGradient(0, 0, 0, h);
+      if (kind === 'night') { g.addColorStop(0, '#02040d'); g.addColorStop(0.42, '#0a1430'); g.addColorStop(0.5, '#1d2c50'); g.addColorStop(0.58, '#0c1222'); g.addColorStop(1, '#05070d'); }
+      else { g.addColorStop(0, '#2b2a63'); g.addColorStop(0.3, '#7a4f8a'); g.addColorStop(0.44, '#ef8a5a'); g.addColorStop(0.5, '#ffd27a'); g.addColorStop(0.56, '#c9765a'); g.addColorStop(1, '#3a2a3a'); }
+      ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      if (kind === 'night') {
+        for (var i = 0; i < 1600; i++) { var y = Math.random() * h * 0.46, a = 0.25 + Math.random() * 0.6; ctx.fillStyle = 'rgba(255,255,255,' + a + ')'; ctx.fillRect(Math.random() * w, y, 1, 1); }
+        ctx.fillStyle = '#f4f1e0'; ctx.beginPath(); ctx.arc(w * 0.62, h * 0.2, 28, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(244,241,224,.15)'; ctx.beginPath(); ctx.arc(w * 0.62, h * 0.2, 70, 0, Math.PI * 2); ctx.fill();
+      } else {
+        var sg = ctx.createRadialGradient(w * 0.25, h * 0.47, 8, w * 0.25, h * 0.47, 240);
+        sg.addColorStop(0, 'rgba(255,250,220,1)'); sg.addColorStop(0.15, 'rgba(255,220,140,.9)'); sg.addColorStop(1, 'rgba(255,170,90,0)');
+        ctx.fillStyle = sg; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(255,190,150,.35)';
+        for (var c = 0; c < 14; c++) { ctx.beginPath(); ctx.ellipse(Math.random() * w, h * (0.28 + Math.random() * 0.15), 120 + Math.random() * 240, 16 + Math.random() * 20, 0, 0, Math.PI * 2); ctx.fill(); }
+      }
+    });
+    tex.wrapV = B.Texture.CLAMP_ADDRESSMODE;
+    var dome = B.MeshBuilder.CreateSphere('skyDome', { diameter: 1500, segments: 24, sideOrientation: B.Mesh.BACKSIDE }, sc);
+    var m = new B.StandardMaterial('skyM', sc);
+    m.emissiveTexture = tex; m.disableLighting = true; m.fogEnabled = false; m.backFaceCulling = false;
+    dome.material = m; dome.infiniteDistance = true; dome.isPickable = false; dome.applyFog = false;
+    this.meshes.push(dome);
+    return dome;
+  };
+
+  /** Sky, image lighting, sun / moon and fog for the level's time of day. */
+  Road.prototype.setupSky = function (camera, sun, hemi) {
+    var L = this.level, k = this.kit, sc = this.scene, t = L.time || 'day';
+    if (t === 'night') {
+      k.environment('overcast', { camera: camera, noSky: true, exposure: 1.1, envIntensity: 0.12 });
+      this.paintedSky('night');
+      sun.direction = new B.Vector3(0.3, -0.8, 0.5); sun.diffuse = new B.Color3(0.55, 0.65, 1); sun.intensity = 0.45;
+      hemi.diffuse = new B.Color3(0.25, 0.3, 0.5); hemi.groundColor = new B.Color3(0.05, 0.05, 0.08); hemi.intensity = 0.3;
+      sc.fogColor = B.Color3.FromHexString('#0b1426'); sc.fogStart = 40; sc.fogEnd = 320;
+      sc.clearColor = new B.Color4(0.02, 0.03, 0.07, 1);
+    } else if (t === 'sunset') {
+      k.environment('clear', { camera: camera, noSky: true, exposure: 0.95, envIntensity: 0.55 });
+      this.paintedSky('sunset');
+      sun.direction = new B.Vector3(-0.85, -0.3, 0.42); sun.diffuse = new B.Color3(1, 0.62, 0.38); sun.intensity = 2.0;
+      hemi.diffuse = new B.Color3(0.9, 0.62, 0.55); hemi.intensity = 0.35;
+      sc.fogColor = B.Color3.FromHexString('#d9926e'); sc.fogStart = 120; sc.fogEnd = 650;
+    } else {
+      k.environment(this.skyName(), { camera: camera, exposure: L.weather === 'clear' ? 1.05 : 1.2 });
+      if (L.theme === 'canyon') { sun.diffuse = new B.Color3(1, 0.9, 0.78); sc.fogColor = B.Color3.FromHexString('#e8c8a8'); }
+      if (L.theme === 'forest') { sc.fogColor = B.Color3.FromHexString(L.weather === 'fog' ? '#b9c8bc' : '#c2d6c8'); }
+    }
+    this.night = t === 'night';
   };
   Road.prototype.buildSky = function () {
     var sc = this.scene, L = this.level;
@@ -197,10 +351,20 @@
     var a = Math.abs(lat), side = lat < 0 ? -1 : 1, bridge = p.type === 'bridge';
     var base = p.y;
     if (a <= HALF + 1) return base - 0.04;
-    if (a > 300) return base + (this.level.theme === 'city' ? 0 : 20 + 45 * noise1(p.s * 0.004 + side * 3));   // distant hills on the horizon
+    var sd = this.seed || 0;
+    if (this.coastSide && side === this.coastSide) {                // shore: a short beach, then under the water
+      if (p.type === 'bridge') return base - 8;
+      return a < HALF + 7 ? base - 0.3 - (a - HALF - 1) * 0.25 : base - 3.5 - Math.min(1, (a - HALF - 7) / 30) * 6;
+    }
+    if (a > 300) return base + (this.level.theme === 'city' ? 0 : 20 + 45 * noise1(p.s * 0.004 + side * 3 + sd));   // distant hills on the horizon
+    if (p.type === 'tunnel') return base + Math.min(1, (a - HALF - 1) / 2.5) * 16 + Math.min(1, a / 60) * 30;     // the mountain the tunnel goes through
+    if (p.canyon) {                                                  // red rock walls on both sides
+      var wv = 0.7 + 0.6 * noise1(p.s * 0.03 + side * 5 + sd);
+      return base - 0.2 + Math.min(1, (a - HALF - 1) / 5) * 18 * wv + Math.min(1, a / 80) * 25;
+    }
     // keep the ground flat around both warehouses
     if (lat > 0 && a < 48 && (Math.abs(p.s - this.startS) < 30 || Math.abs(p.s - (this.zone.s1 + this.zone.s2) / 2) < 30)) return base - 0.04;
-    var hill = (noise1(p.s * 0.012 + side * 7.3) - 0.35) * (this.level.theme === 'snow' ? 26 : this.level.theme === 'desert' ? 8 : this.level.theme === 'city' ? 0 : 14);
+    var hill = (noise1(p.s * 0.012 + side * 7.3 + sd) - 0.35) * (this.level.theme === 'snow' ? 26 : this.level.theme === 'desert' ? 8 : this.level.theme === 'city' ? 0 : 14);
     var u = Math.min(1, (a - HALF - 1) / 60);
     var hgt = base - 0.3 + smooth(u) * Math.max(0, hill) + u * 2;
     if (bridge) hgt = Math.min(hgt, base - 8 + u * 4);
@@ -249,9 +413,11 @@
       row++;
     });
     var k = this.kit, th = this.level.theme;
-    var groundName = th === 'desert' ? 'sand' : th === 'snow' ? 'snow' : th === 'city' ? 'concrete' : 'grass';
-    var groundMat = k.surface(groundName, 1, { env: th === 'snow' ? 0.9 : 0.35, tint: th === 'country' ? '#a6dd72' : undefined });
-    var rockMat = k.surface(th === 'desert' ? 'rock' : 'cliff', 1, { env: 0.45, tint: th === 'desert' ? '#d8b48a' : th === 'snow' ? '#c9cfd6' : undefined });
+    var dry = th === 'desert' || th === 'canyon';
+    var groundName = dry ? 'sand' : th === 'snow' ? 'snow' : th === 'city' ? 'concrete' : 'grass';
+    var tint = th === 'country' || th === 'coast' ? (this.level.autumn ? '#c9c27a' : '#a6dd72') : th === 'forest' ? (this.level.autumn ? '#b8a860' : '#7fb85a') : th === 'canyon' ? '#e0a27a' : undefined;
+    var groundMat = k.surface(groundName, 1, { env: th === 'snow' ? 0.9 : 0.35, tint: tint });
+    var rockMat = k.surface(dry ? 'rock' : 'cliff', 1, { env: 0.45, tint: th === 'canyon' ? '#c8764a' : dry ? '#d8b48a' : th === 'snow' ? '#c9cfd6' : undefined });
     var mk = function (name, ind, mat) {
       if (!ind.length) return;
       var m = new B.Mesh(name, self.scene), vd = new B.VertexData(), nrm = [];
@@ -330,6 +496,15 @@
       for (var s = sc.s1; s <= sc.s2; s += 8) self.obstacles.push({ type: 'cone', s: s, lat: -0.4, hit: false });
       self.strip('closed', sc.s1, sc.s2, -HALF + 0.3, -0.2, 0.045, '#ff8a1f', 0.35);
     });
+    // slalom: groups of cones close the right and left lane in turn
+    this.sections.forEach(function (sc) {
+      if (sc.type !== 'slalom') return;
+      var side = 1;
+      for (var s = sc.s1 + 10; s <= sc.s2 - 10; s += 26) {
+        [-0.9, 0, 0.9].forEach(function (dl) { self.obstacles.push({ type: 'cone', s: s + dl * 1.5, lat: side * (HALF / 2) + dl, hit: false, slalom: true }); });
+        side = -side;
+      }
+    });
     var cone = null;
     this.obstacles.forEach(function (o) {
       var f = self.at(o.s);
@@ -349,12 +524,13 @@
       } else if (o.type === 'cone') {
         if (!cone) { cone = B.MeshBuilder.CreateCylinder('cone', { diameterTop: 0.08, diameterBottom: 0.5, height: 0.75, tessellation: 8 }, self.scene); cone.material = k.mat('#ff7a1a'); cone.position.y = 0; self.meshes.push(cone); }
         var p = self.world(o.s, o.lat, 0.38);
-        cone.thinInstanceAdd(B.Matrix.Translation(p.x, p.y, p.z));
+        cone.thinInstanceAdd(B.Matrix.Translation(p.x, p.y, p.z), false);
       }
     });
+    if (cone) { cone.thinInstanceBufferUpdated('matrix'); cone.thinInstanceRefreshBoundingInfo(false); cone.alwaysSelectAsActiveMesh = true; k.shadow(cone); }
     this.sections.forEach(function (sc) {
-      var label = { mud: 'MUD', ice: 'ICE', rough: 'ROUGH', bridge: 'BRIDGE', narrow: 'ROADWORKS' }[sc.type];
-      if (label) self.signPost(sc.s1 - 50, label, sc.type === 'narrow' ? '#ff8a1f' : '#ffcc33', '#1d1d22');
+      var label = { mud: 'MUD', ice: 'ICE', rough: 'ROUGH', bridge: 'BRIDGE', narrow: 'ROADWORKS', slalom: 'CONES AHEAD' }[sc.type];
+      if (label) self.signPost(sc.s1 - 50, label, sc.type === 'narrow' || sc.type === 'slalom' ? '#ff8a1f' : '#ffcc33', '#1d1d22');
     });
     // curve warnings
     var P = this.pts;
@@ -381,7 +557,7 @@
 
   /** Tree / cactus / rock prototypes, merged per kind so each kind draws in one call (thin instances). */
   Road.prototype.propKinds = function () {
-    var k = this.kit, sc = this.scene, th = this.level.theme, kinds = [];
+    var k = this.kit, sc = this.scene, th = this.level.theme, kinds = [], autumn = !!this.level.autumn;
     var bark = k.surface('bark', 1, { env: 0.3, v: 2 });
     var leaf = function (hex) { return k.pbr(hex, { rough: 0.85, env: 0.5 }); };
     var lumpy = function (m, amt, seed) {            // roughen a sphere so foliage and rocks look natural
@@ -391,7 +567,7 @@
       return m;
     };
     var merge = function (parts, name) { var m = B.Mesh.MergeMeshes(parts, true, true, undefined, false, true); m.name = name; m.alwaysSelectAsActiveMesh = true; m.isPickable = false; return m; };
-    if (th === 'desert') {
+    if (th === 'desert' || th === 'canyon') {
       var c = [], body = B.MeshBuilder.CreateCapsule('cBody', { radius: 0.32, height: 3.6, tessellation: 10 }, sc); body.position.y = 1.8; body.material = leaf('#4f8a3c'); c.push(body);
       [[-1, 2.0, 1.0], [1, 2.4, 0.9]].forEach(function (a) {
         var h = B.MeshBuilder.CreateCapsule('cArmH', { radius: 0.2, height: 0.9, tessellation: 8 }, sc); h.rotation.z = Math.PI / 2; h.position.set(a[0] * 0.45, a[1], 0); h.material = body.material; c.push(h);
@@ -400,35 +576,46 @@
       kinds.push(merge(c, 'cactus'));
       var bush = lumpy(B.MeshBuilder.CreateIcoSphere('bush', { radius: 0.8, subdivisions: 2 }, sc), 0.35, 3); bush.scaling.y = 0.6; bush.position.y = 0.35; bush.material = leaf('#8a8a4a');
       kinds.push(merge([bush], 'bush'));
-    } else if (th === 'snow') {
+    } else if (th === 'snow' || th === 'forest') {
+      var snowy = th === 'snow';
       [0, 1].forEach(function (v) {
         var t = [], tr = B.MeshBuilder.CreateCylinder('trunk', { diameterTop: 0.22, diameterBottom: 0.38, height: 2.4, tessellation: 8 }, sc); tr.position.y = 1.2; tr.material = bark; t.push(tr);
         for (var i = 0; i < 4; i++) {
           var cone = B.MeshBuilder.CreateCylinder('pine', { diameterTop: 0.1, diameterBottom: 3.6 - i * 0.75, height: 2.4, tessellation: 9 }, sc);
           cone.position.y = 2.2 + i * 1.45; cone.material = leaf(v ? '#24533c' : '#2c5f45'); t.push(cone);
-          var snow = B.MeshBuilder.CreateCylinder('snow', { diameterTop: 0.05, diameterBottom: (3.6 - i * 0.75) * 0.75, height: 1.0, tessellation: 9 }, sc);
-          snow.position.y = 2.95 + i * 1.45; snow.material = k.pbr('#f3f7fb', { rough: 0.6 }); t.push(snow);
+          if (snowy) {
+            var snow = B.MeshBuilder.CreateCylinder('snow', { diameterTop: 0.05, diameterBottom: (3.6 - i * 0.75) * 0.75, height: 1.0, tessellation: 9 }, sc);
+            snow.position.y = 2.95 + i * 1.45; snow.material = k.pbr('#f3f7fb', { rough: 0.6 }); t.push(snow);
+          }
         }
         kinds.push(merge(t, 'pine' + v));
       });
+      if (!snowy) kinds.push.apply(kinds, this.leafyTrees(bark, leaf, lumpy, merge, autumn, [0]));
     } else {
-      [0, 1, 2].forEach(function (v) {
-        var t = [], tr = B.MeshBuilder.CreateCylinder('trunk', { diameterTop: 0.28, diameterBottom: 0.5, height: 3.2, tessellation: 9 }, sc); tr.position.y = 1.6; tr.material = bark; t.push(tr);
-        var greens = ['#3d7a2e', '#4a8a34', '#56953a', '#35702a'];
-        for (var i = 0; i < 5; i++) {
-          var r = 1.25 + hash(v * 9 + i) * 0.6;
-          var blob = lumpy(B.MeshBuilder.CreateIcoSphere('leaves', { radius: r, subdivisions: 2 }, sc), 0.28, v * 31 + i * 7);
-          var a = i / 5 * Math.PI * 2 + v;
-          blob.position.set(i ? Math.cos(a) * 1.0 : 0, 4.0 + (i ? hash(v + i * 3) * 1.2 : 1.1), i ? Math.sin(a) * 1.0 : 0);
-          blob.material = leaf(greens[(i + v) % greens.length]); t.push(blob);
-        }
-        kinds.push(merge(t, 'tree' + v));
-      });
+      kinds.push.apply(kinds, this.leafyTrees(bark, leaf, lumpy, merge, autumn, [0, 1, 2]));
     }
     var rock = lumpy(B.MeshBuilder.CreateIcoSphere('rock', { radius: 1, subdivisions: 2 }, sc), 0.45, 77);
-    rock.scaling.set(1.3, 0.7, 1); rock.material = k.surface(th === 'desert' ? 'rock' : 'cliff', 0.5, { env: 0.4, tint: th === 'desert' ? '#d8b48a' : undefined });
+    rock.scaling.set(1.3, 0.7, 1); rock.material = k.surface(th === 'desert' || th === 'canyon' ? 'rock' : 'cliff', 0.5, { env: 0.4, tint: th === 'canyon' ? '#c8764a' : th === 'desert' ? '#d8b48a' : undefined });
     kinds.push(merge([rock], 'rockProp'));
     return kinds;
+  };
+
+  /** Broad-leaf trees (green, or orange / red in autumn). */
+  Road.prototype.leafyTrees = function (bark, leaf, lumpy, merge, autumn, variants) {
+    var sc = this.scene, out = [];
+    variants.forEach(function (v) {
+      var t = [], tr = B.MeshBuilder.CreateCylinder('trunk', { diameterTop: 0.28, diameterBottom: 0.5, height: 3.2, tessellation: 9 }, sc); tr.position.y = 1.6; tr.material = bark; t.push(tr);
+      var greens = autumn ? ['#d9822b', '#c4471f', '#e8b630', '#a8541c'] : ['#3d7a2e', '#4a8a34', '#56953a', '#35702a'];
+      for (var i = 0; i < 5; i++) {
+        var r = 1.25 + hash(v * 9 + i) * 0.6;
+        var blob = lumpy(B.MeshBuilder.CreateIcoSphere('leaves', { radius: r, subdivisions: 2 }, sc), 0.28, v * 31 + i * 7);
+        var a = i / 5 * Math.PI * 2 + v;
+        blob.position.set(i ? Math.cos(a) * 1.0 : 0, 4.0 + (i ? hash(v + i * 3) * 1.2 : 1.1), i ? Math.sin(a) * 1.0 : 0);
+        blob.material = leaf(greens[(i + v) % greens.length]); t.push(blob);
+      }
+      out.push(merge(t, 'tree' + v));
+    });
+    return out;
   };
 
   Road.prototype.buildProps = function () {
@@ -437,13 +624,16 @@
     var kinds = this.propKinds(), rockKind = kinds[kinds.length - 1], plants = kinds.slice(0, -1);
     var avoid = [[this.startS - 45, this.startS + 35], [this.zone.s1 - 45, this.zone.s2 + 45]];
     this.sections.forEach(function (s) { if (s.type === 'bridge') avoid.push([s.s1 - 10, s.s2 + 10]); });
-    for (var i = 0; i < P.length; i += 3) {
+    var stepP = this.level.theme === 'forest' ? 2 : 3;
+    for (var i = 0; i < P.length; i += stepP) {
       var p = P[i];
       if (avoid.some(function (r) { return p.s > r[0] && p.s < r[1]; })) continue;
       for (var side = -1; side <= 1; side += 2) {
-        if (hash(i * 3.7 + side) < (th === 'desert' ? 0.7 : 0.3)) continue;
-        if (p.cliff === side) continue;                        // nothing grows on the drop
-        var lat = side * (HALF + (p.cliff ? 14 : 6) + hash(i * 1.3 + side * 9) * 40), f = this.at(p.s + hash(i + side) * 5);
+        var sd = this.seed || 0;
+        if (hash(i * 3.7 + side + sd) < (th === 'desert' || th === 'canyon' ? 0.72 : th === 'forest' ? 0.02 : 0.3)) continue;
+        if (p.cliff === side || side === this.coastSide || p.type === 'tunnel') continue;     // nothing on drops, beaches or tunnel walls
+        var near = th === 'forest' ? 3.5 : p.canyon ? 22 : p.cliff ? 14 : 6;
+        var lat = side * (HALF + near + hash(i * 1.3 + side * 9 + sd) * (th === 'forest' ? 25 : 40)), f = this.at(p.s + hash(i + side) * 5);
         var x = f.x + f.rx * lat, z = f.z + f.rz * lat, y = this.terrainHeight(Object.assign({}, f, { s: p.s, cliff: p.cliff, type: p.type }), lat) - 0.1;
         var sz = 0.75 + hash(i * 7.7 + side) * 0.7, rot = B.Matrix.RotationY(hash(i * 2.1) * 6.28);
         var isRock = hash(i * 5.3 + side) < 0.22;

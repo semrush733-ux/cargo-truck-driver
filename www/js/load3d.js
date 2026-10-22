@@ -2,7 +2,7 @@
    the first time a 3D feature is opened, with a loading screen. Nothing is fetched from the internet. */
 (function (CT) {
   'use strict';
-  var FILES = ['vendor/babylon.js', 'js3d/kit.js', 'js3d/humans3d.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/traffic3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js',
+  var FILES = ['vendor/babylon.js', 'js3d/kit.js', 'js3d/humans3d.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/traffic3d.js', 'js3d/hazards3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js',
     'js3d/mode3d.js', 'js3d/game3d.js', 'js3d/workshop3d.js', 'js3d/showroom3d.js', 'js3d/menu3d.js'];
   var state = 'idle', waiting = [];
 

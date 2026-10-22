@@ -67,7 +67,7 @@
       if (kind === 'bus' && this.density < 0.4) kind = 'van';
       var car = buildCar(k, kind, PAINTS[Math.floor(hash(seed + i) * PAINTS.length)], i);
       car.dir = i % 2 === 0 ? 1 : -1;                    // +1 going your way (right lane), -1 oncoming (left lane)
-      car.lat = car.dir > 0 ? CT.Road3D.LANE_R : CT.Road3D.LANE_L;
+      car.lat = car.baseLat = car.dir > 0 ? CT.Road3D.LANE_R : CT.Road3D.LANE_L;
       car.cruise = (car.dir > 0 ? 11 + hash(seed + i * 3) * 7 : 14 + hash(seed + i * 5) * 8) * (kind === 'bus' ? 0.8 : 1);
       car.v = car.cruise; car.stop = 0; car.braking = false; car.honk = 0;
       car.node.setEnabled(false);
@@ -92,6 +92,9 @@
     if (s < r.startS + 40 || s > r.zone.s1 - 30 || s > r.length - 20) return false;
     var sec = r.sectionAt(s);
     if (sec && sec.type === 'narrow' && c.dir < 0) return false;
+    if (sec && sec.type === 'slalom' && c.dir < 0) return false;      // cones across both lanes: oncoming cars wait outside
+    var hz = this.g.hazards;
+    if (hz && c.dir > 0 && hz.noTrafficAt(s)) return false;           // no queue at the toll gate
     return true;
   };
 
@@ -101,7 +104,7 @@
       // recycle cars that fell far behind the truck to a spot well ahead
       if (c.s < ts - 70 || c.s > ts + 520 || !c.active) {
         var ns = ts + 260 + hash(c.s + self.g.t) * 220;
-        c.s = ns; c.v = c.cruise; c.stop = 0;
+        c.s = ns; c.v = c.cruise; c.stop = 0; c.lat = c.baseLat;
         c.active = self.allowed(c, ns);
         c.node.setEnabled(c.active);
         if (!c.active) return;
@@ -116,6 +119,46 @@
       var tInLane = Math.abs(tl - c.lat) < 2.4, dT = (ts - c.s) * c.dir - (truck.halfLen + c.L / 2);
       if (tInLane && dT > -2 && dT < gapAhead) gapAhead = dT;
       if (gapAhead < 60) target = Math.min(target, Math.max(0, (gapAhead - 6) * 0.6));
+      // traffic lights, level crossings and animals: stop like a real driver
+      var hz = self.g.hazards;
+      if (hz) {
+        var sAt = hz.carStop(c);
+        if (sAt != null) { var gs = (sAt - c.s) * c.dir - c.L / 2; target = Math.min(target, Math.max(0, gs * 0.7)); if (gs < 0.5) target = 0; }
+        // give way: when the truck waits behind a blocker in its own lane, oncoming cars stop and let it pass
+        if (c.dir < 0) hz.items.forEach(function (o) {
+          if (o.type !== 'block' || o.lat * c.baseLat > 0) return;
+          var waiting = ts > o.s - 45 && (ts < o.s + 25 || tl < 0);
+          var yieldAt = o.s + o.halfS + truck.halfLen + 26;
+          if (waiting && c.s > yieldAt - 1 && c.s < yieldAt + 90) { var gy = c.s - yieldAt - c.L / 2; target = Math.min(target, Math.max(0, gy * 0.6)); if (gy < 0.5) target = 0; }
+        });
+        // a blocked lane: slow down and go round it in the other lane
+        var blk = hz.blockedFor(c.s, c.baseLat, c.dir);
+        var wantLat = c.baseLat;
+        if (blk) {
+          // go round only when the truck is not coming in the other lane; otherwise wait behind the blocker
+          var tAhead = (ts - c.s) * c.dir, truckThere = Math.abs(tl + c.baseLat) < 2.8 && tAhead > -truck.halfLen - c.L && tAhead < 170;
+          var bAhead = (blk.s - c.s) * c.dir, alongside = bAhead < blk.halfS + c.L / 2 + 1;
+          if (truckThere && !alongside) {
+            // not committed yet: stay (or go back) in our lane and wait behind the blocker
+            var gb = bAhead - blk.halfS - c.L / 2 - 4;
+            target = Math.min(target, Math.max(0, gb * 0.6)); if (gb < 0.5) target = 0;
+          } else { wantLat = -c.baseLat; target = Math.min(target, alongside ? 9 : 7); }   // committed: finish passing quickly
+        }
+        if (c.lat !== wantLat && !c.inSlalom) { var dl = wantLat - c.lat, stepL = 2.2 * dt; c.lat = Math.abs(dl) < stepL ? wantLat : c.lat + Math.sign(dl) * stepL; }
+      }
+      // roadworks slalom: same-way cars weave slowly through the cones, oncoming cars wait at the far end
+      c.inSlalom = false;
+      r.sections.forEach(function (sc) {
+        if (sc.type !== 'slalom') return;
+        if (c.dir < 0 && c.s > sc.s2 - 2 && c.s < sc.s2 + 70) { var gw = c.s - (sc.s2 + 6) - c.L / 2; target = Math.min(target, Math.max(0, gw * 0.6)); if (gw < 0.5) target = 0; }
+        if (c.dir > 0 && c.s > sc.s1 - 10 && c.s < sc.s2 + 4) {
+          target = Math.min(target, 6); c.inSlalom = true;
+          var nx = null; r.obstacles.forEach(function (o) { if (o.slalom && o.s > c.s - c.L / 2 - 1 && o.s < c.s + 26 && (!nx || o.s < nx.s)) nx = o; });
+          var wl = nx ? (nx.lat > 0 ? -2.0 : 2.0) : c.baseLat, st = 3 * dt, dl2 = wl - c.lat;
+          c.lat = Math.abs(dl2) < st ? wl : c.lat + Math.sign(dl2) * st;
+        }
+      });
+      if (!self.allowed(c, c.s) && Math.abs(c.s - ts) > 45) { c.active = false; c.node.setEnabled(false); return; }
       if (c.stop > 0) { c.stop -= dt; target = 0; }
       c.braking = target < c.v - 0.5;
       c.v += Math.max(-9 * dt, Math.min(3 * dt, target - c.v));

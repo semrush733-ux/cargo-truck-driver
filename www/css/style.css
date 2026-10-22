@@ -825,3 +825,15 @@ body.mode3d #game { visibility: hidden; }
 .hud3d.locked .h3-wheel { pointer-events: none; }
 @media (max-height: 430px) { .h3-wheel { width: 132px; height: 132px; } }
 .garage-preview canvas.g3d { aspect-ratio: 640 / 300; touch-action: none; cursor: grab; }
+
+/* mission card (3D levels) */
+.hud3d .h3-mission { pointer-events: auto; }
+.h3-mission { position: absolute; right: var(--pad, 12px); top: calc(var(--sat, 0px) + 62px); width: min(320px, 46vw); max-height: 62vh; overflow: auto; background: rgba(18, 22, 34, .92); color: #fff; border: 2px solid #ffc21a; border-radius: 16px; padding: 12px 14px; font-weight: 700; font-size: 13px; box-shadow: 0 6px 0 rgba(0,0,0,.3); animation: bannerPop .4s; z-index: 5; }
+.h3-mission[hidden] { display: none; }
+.h3-mission .hm-ch { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #ffc21a; }
+.h3-mission .hm-title { font-size: 19px; font-weight: 900; margin: 2px 0 4px; }
+.h3-mission .hm-blurb { color: #d7deea; font-weight: 600; margin-bottom: 6px; }
+.h3-mission ul { list-style: none; margin: 0 0 8px; padding: 0; }
+.h3-mission li { padding: 3px 0; border-top: 1px solid rgba(255,255,255,.1); }
+.h3-mission .btn { float: right; padding: 6px 16px; font-size: 13px; }
+@media (max-width: 560px) { .h3-mission { width: min(260px, 70vw); font-size: 12px; } }

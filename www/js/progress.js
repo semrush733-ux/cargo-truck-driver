@@ -45,8 +45,8 @@
     { id: 'distance_25',    name: '25 km Club',          desc: 'Drive 25 km in total',                     stat: 'distanceM',      target: 25000,  reward: 500, unit: 'm' },
     { id: 'distance_100',   name: '100 km Club',         desc: 'Drive 100 km in total',                    stat: 'distanceM',      target: 100000, reward: 1500, unit: 'm' },
     { id: 'stars_30',       name: 'Rising Star',         desc: 'Hold 30 stars across all levels',          fn: function () { return CT.Storage.totalStars3d(); }, target: 30, reward: 500 },
-    { id: 'chapter_1',      name: 'Valley Master',       desc: 'Finish all Green Valley levels',           fn: function () { var r = CT.Storage.getLevel3d(6); return r && r.completed ? 1 : 0; }, target: 1, reward: 800 },
-    { id: 'all_levels',     name: 'Legend of the Road',  desc: 'Finish all 30 levels',                     fn: function () { var n = 0; for (var i = 1; i <= 30; i++) { var r = CT.Storage.getLevel3d(i); if (r && r.completed) n++; } return n; }, target: 30, reward: 5000 }
+    { id: 'chapter_1',      name: 'Valley Master',       desc: 'Finish all Green Valley levels',           fn: function () { var r = CT.Storage.getLevel3d(10); return r && r.completed ? 1 : 0; }, target: 1, reward: 800 },
+    { id: 'all_levels',     name: 'Legend of the Road',  desc: 'Finish all 50 levels',                     fn: function () { var n = 0; for (var i = 1; i <= 50; i++) { var r = CT.Storage.getLevel3d(i); if (r && r.completed) n++; } return n; }, target: 50, reward: 5000 }
   ];
 
   function achValue(a) { return a.fn ? a.fn() : CT.Storage.stat(a.stat); }
