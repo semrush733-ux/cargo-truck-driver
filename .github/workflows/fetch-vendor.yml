@@ -1,0 +1,40 @@
+name: Fetch 3D engine (Babylon.js)
+
+# Copies the Babylon.js browser build from npm into www/vendor so the game runs fully offline
+# (the APK never loads code from the internet). Runs when this file changes or by hand.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fetch-vendor.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Download Babylon.js
+        run: |
+          VER=8.33.2
+          mkdir -p /tmp/bjs && cd /tmp/bjs
+          npm pack "babylonjs@$VER" || { VER=$(npm view babylonjs@8 version | tail -1 | sed "s/.*'\(.*\)'.*/\1/; s/^babylonjs@//; s/ .*//"); npm pack "babylonjs@$VER"; }
+          tar xzf babylonjs-*.tgz
+          ls -la package
+          mkdir -p "$GITHUB_WORKSPACE/www/vendor"
+          cp package/babylon.js "$GITHUB_WORKSPACE/www/vendor/babylon.js"
+          cp package/license.md "$GITHUB_WORKSPACE/www/vendor/babylon-LICENSE.md" 2>/dev/null || cp package/LICENSE* "$GITHUB_WORKSPACE/www/vendor/" 2>/dev/null || true
+          echo "babylonjs $(node -p "require('./package/package.json').version") (Apache-2.0) from npm" > "$GITHUB_WORKSPACE/www/vendor/VERSION.txt"
+          ls -la "$GITHUB_WORKSPACE/www/vendor"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add www/vendor
+          git diff --cached --quiet || git commit -m "Add Babylon.js browser build to www/vendor [skip ci]"
+          git push
