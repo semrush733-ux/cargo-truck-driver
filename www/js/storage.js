@@ -6,7 +6,7 @@ window.CT = window.CT || {};
   var KEY = 'cargoTruckDriver.save.v1';
   var SCHEMA = 3;
 
-  var DEFAULT_SETTINGS = { sound: true, music: true, engine: true, vibrate: true, gyro: false, gyroSens: 15, camera: 'side', cam3d: 'chase', lowFx: false, gyroNeutral: 0 };
+  var DEFAULT_SETTINGS = { sound: true, music: true, engine: true, vibrate: true, gyro: false, gyroSens: 15, camera: 'side', cam3d: 'chase', lowFx: false, gyroNeutral: 0, steerMode: 'wheel' };
   var UPGRADE_KEYS = ['engine', 'tyres', 'suspension', 'brakes', 'stability', 'fuel'];
   var STAT_KEYS = ['deliveries', 'perfect', 'noLoss', 'itemsDelivered', 'itemsLost', 'distanceM', 'upgradesBought', 'crashes', 'starsEarned', 'levelsFailed', 'cosmeticsBought'];
 
@@ -52,6 +52,7 @@ window.CT = window.CT || {};
       d.settings.camera = ['side', 'chase', 'cab'].indexOf(s.camera) >= 0 ? s.camera : 'side';
       d.settings.cam3d = ['chase', 'far', 'cab'].indexOf(s.cam3d) >= 0 ? s.cam3d : 'chase';
       d.settings.lowFx = bool(s.lowFx, false);
+      d.settings.steerMode = s.steerMode === 'buttons' ? 'buttons' : 'wheel';
       d.settings.gyroNeutral = num(s.gyroNeutral, 0, -60, 60);
     }
     if (isObj(p.levels)) {

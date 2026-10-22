@@ -82,7 +82,7 @@
       back.forEach(function (k) { var e = $(k); if (e) e.hidden = false; });
       if (back.indexOf('garage') >= 0) CT.UI.renderGarage();
       if (back.indexOf('levels3d') >= 0) CT.Premium.renderPicker($('truckPick'));
-      if (back.indexOf('menu') >= 0) CT.UI.refreshMenu();
+      if (back.indexOf('menu') >= 0) { CT.UI.refreshMenu(); if (CT.Menu3D) CT.Menu3D.show(); }
     }
   };
 })(window.CT);

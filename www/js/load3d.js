@@ -2,8 +2,8 @@
    the first time a 3D feature is opened, with a loading screen. Nothing is fetched from the internet. */
 (function (CT) {
   'use strict';
-  var FILES = ['vendor/babylon.js', 'js3d/kit.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js',
-    'js3d/mode3d.js', 'js3d/game3d.js', 'js3d/workshop3d.js', 'js3d/showroom3d.js'];
+  var FILES = ['vendor/babylon.js', 'js3d/kit.js', 'js3d/humans3d.js', 'js3d/trucks3d.js', 'js3d/road3d.js', 'js3d/traffic3d.js', 'js3d/drive3d.js', 'js3d/cargo3d.js',
+    'js3d/mode3d.js', 'js3d/game3d.js', 'js3d/workshop3d.js', 'js3d/showroom3d.js', 'js3d/menu3d.js'];
   var state = 'idle', waiting = [];
 
   function overlay(on, text, frac) {
@@ -25,13 +25,13 @@
   CT.Load3D = {
     ready: function () { return state === 'ready'; },
     supported: webglOk,
-    ensure: function (cb) {
+    ensure: function (cb, quiet) {
       if (state === 'ready') { cb(); return; }
       waiting.push(cb);
       if (state === 'loading') return;
       if (!webglOk()) { CT.UI.achToast('This phone cannot show 3D graphics (WebGL is off).'); waiting = []; return; }
       state = 'loading';
-      overlay(true, 'Loading the 3D world…', 0);
+      if (!quiet) overlay(true, 'Loading the 3D world…', 0);
       var i = 0;
       (function next() {
         if (i >= FILES.length) {
@@ -43,7 +43,7 @@
         }
         var sc = document.createElement('script');
         sc.src = FILES[i];
-        sc.onload = function () { i++; overlay(true, null, i / FILES.length); next(); };
+        sc.onload = function () { i++; if (!quiet) overlay(true, null, i / FILES.length); next(); };
         sc.onerror = function () {
           state = 'idle'; waiting = []; overlay(false);
           CT.UI.achToast('Could not load ' + FILES[i]);

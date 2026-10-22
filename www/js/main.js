@@ -66,7 +66,7 @@
       App.addListener('resume', goForeground);
       App.addListener('backButton', function () {
         var S = CT.Game.STATES;
-        if (CT.Mode3D && CT.Mode3D.active) { CT.Mode3D.back(); return; }
+        if (CT.Mode3D && CT.Mode3D.active && CT.Mode3D.back() !== false) return;
         if (game.state === S.PAUSED) game.resume();
         else if (game.isPlaying()) game.pause();
         else if (game.state === S.LEVEL_COMPLETE || game.state === S.LEVEL_FAILED) { CT.UI.hideWin(); CT.UI.hideFail(); game.toMenu(); }
@@ -100,7 +100,11 @@
 
   CT.UI.showMenu();
   startLoop();
-  setTimeout(function () { CT.UI.hideSplash(); }, 900);
+  // the whole game is 3D: load the engine behind the splash, then show the 3D menu scene
+  var splashDone = false, hideSplash = function () { if (!splashDone) { splashDone = true; CT.UI.hideSplash(); } };
+  setTimeout(hideSplash, 12000);                       // never stay stuck on the splash
+  if (CT.Load3D.supported()) CT.Load3D.ensure(function () { if (!document.getElementById('menu').hidden) CT.Menu3D.show(); hideSplash(); }, true);
+  else setTimeout(hideSplash, 900);
   // background music starts after the first tap (browsers block audio before that)
   document.addEventListener('pointerdown', function first() {
     document.removeEventListener('pointerdown', first);

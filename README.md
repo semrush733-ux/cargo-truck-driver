@@ -1,21 +1,24 @@
 # Cargo Truck Driver
 
-A cargo-delivery truck game in HTML5 + vanilla JavaScript, packaged for Android with Capacitor.
+A 3D cargo-delivery truck game in HTML5 + JavaScript with Babylon.js 8.33.2, packaged for Android with Capacitor. Everything ships inside the app, so it works with no internet.
 
-There are two ways to play, and both use the same save, cash, garage, missions and achievements:
+- **The whole game is 3D.**
+  - The menu shows a live 3D scene, and PLAY opens the 3D game.
+  - There are **30 levels in 5 chapters**: Green Valley, Mountain Pass, City Streets, Desert Run and Snow Peaks.
+  - Levels have mountain roads with drops, bridges, mud, ice, roadworks, potholes, speed bumps, rain, fog and **traffic** (cars, vans and buses going your way, and oncoming cars).
+- **Realistic look:**
+  - physically based (PBR) paint, chrome and glass;
+  - real sky photos with image-based lighting and ACES tone mapping;
+  - CC0 photo textures for asphalt, grass, rock, sand, snow, concrete, wood and bark (from Poly Haven);
+  - soft shadows.
+- **People:** a driver in the cab, a seated forklift operator, and depot workers who walk, stand and wave the truck in.
+- **Driving:**
+  - an on-screen **steering wheel** (or ◀ ▶ buttons), optional gyro, GAS, BRAKE and R;
+  - three cameras: TPP, HIGH and FPP.
+- **Already included:** the engine-upgrade workshop, the premium electric truck with 3 demo drives and a Google Play unlock, cash, garage, missions, achievements and saves.
+- **Adaptive quality:** if a phone cannot hold about 22 FPS, Low effects switches on by itself (you can turn it off again in Pause).
 
-- **2D campaign:** 50 side-view levels on a Canvas. It has drag-and-drop or worker loading, fuel, road surfaces, potholes, traffic, weather, and cargo that can fall off and be recovered.
-- **3D mode:** real 3D built with Babylon.js 8.33.2, shipped inside the app with no internet needed. It has 6 levels:
-  - a very easy tutorial;
-  - a valley road;
-  - a river bridge with rain and mud;
-  - roadworks in the desert;
-  - a high **mountain road** with drops and no rail in places, where the truck can fall off;
-  - a snow pass with fog and ice.
-
-The 3D mode also includes:
-- the **engine-upgrade workshop** cinematic;
-- the **premium electric truck** "Volt Ranger EV", with 3 free demo drives and a one-time Google Play unlock.
+The older 2D side-view code is still in `www/js/` (game.js, world.js and so on) but is no longer reachable from the menu.
 
 No ads or ad SDKs are included.
 
@@ -64,7 +67,11 @@ On iOS the game asks for permission. If the device has no gyro, or permission is
 | `www/js/load3d.js` | Loads `vendor/babylon.js` and `js3d/*` the first time a 3D feature opens, with a loading screen |
 | `www/js/store.js` | Google Play Billing (cordova-plugin-purchase, which wraps the official Play Billing Library). In a desktop browser it shows a labelled DEVELOPMENT MOCK instead. |
 | `www/js/premium.js` | Premium truck cards, demo-drive counting, showroom and purchase screen |
-| `www/js3d/levels3d.js` | 3D level **data**: road segments with turn, rise, cliff, rail and type (mud / ice / rough / bridge / narrow), plus obstacles, weather, cargo and par time |
+| `www/js3d/levels3d.js` | 3D level **data** and generator. The tutorial is hand-made; levels 2–30 are generated from a seed per level and chapter. Segments carry turn, rise, cliff, rail and type; levels also set obstacles, weather, traffic density, cargo, par and time limit. |
+| `www/js3d/traffic3d.js` | Traffic: cars, SUVs, vans and buses. Same-way traffic is slower than you; oncoming traffic uses the left lane. Cars keep their distance, brake for the truck, show brake lights and honk, and collisions count as crashes. |
+| `www/js3d/humans3d.js` | People built from capsules: seated driver and operator, and walking or waving depot workers |
+| `www/js3d/menu3d.js` | 3D menu backdrop and the live 3D truck preview in the garage |
+| `www/assets/` | CC0 textures (Poly Haven) and HDRI skies, resized for phones (about 3.5 MB). See `assets/LICENSE-assets.txt`. |
 | `www/js3d/kit.js` | Material cache, primitives and procedural textures (no image or model files) |
 | `www/js3d/trucks3d.js` | Original low-poly trucks built in code: Classic Hauler and Volt Ranger EV |
 | `www/js3d/road3d.js` | Road, terrain, cliffs, guard rails, bridges, signs, trees, warehouses, delivery bay, rain and fog |
@@ -76,7 +83,7 @@ On iOS the game asks for permission. If the device has no gyro, or permission is
 | `www/js3d/showroom3d.js` | Rotating 3D showroom for the premium truck |
 | `www/vendor/babylon.js` | Babylon.js 8.33.2 (Apache-2.0), fetched from npm by `.github/workflows/fetch-vendor.yml` |
 
-The **3D models are original and built from code**, so there are no missing model or texture files. They are deliberately simple low-poly models.
+The **3D models are original and built from code** (extruded profiles, PBR materials); there are no imported model files. The photo textures and skies are CC0.
 
 To use licensed GLB models later:
 1. Put them in `www/models/`.
@@ -198,7 +205,7 @@ The checks below were run in headless Chromium (software WebGL):
   - It needs the Play Console product above and a Play-installed build.
   - Without it the truck stays locked and the screen says the store is unavailable.
   - Purchases are verified on the device by the Play Billing library; there is no own receipt-validation server. Add a server validator for stronger anti-fraud.
-- The 3D trucks, forklift and buildings are simple low-poly placeholder models, not high-detail licensed assets.
-- The 3D mode has 6 levels and **no traffic yet**. The 2D campaign has the 50 levels with traffic.
-- The premium truck drives only in the 3D mode. The 2D side view always uses the classic truck art. Paint is not applied to the steel Volt body.
+- Trucks, cars and people are code-built models. They are much better than before, but they are not photo-scanned assets. People have simple shapes and animation (walk and wave).
+- The traffic AI does not overtake by itself, and oncoming cars never cross into your lane.
+- Paint is not applied to the steel Volt body.
 - Gyro calibration and sensitivity were tested with simulated tilt events, not on a real device.

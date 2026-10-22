@@ -74,9 +74,25 @@
       if (!keepCanvas) document.body.classList.remove('mode3d');
     },
 
+    /** Adaptive quality: if a phone cannot keep ~22 FPS for a few seconds, switch to low effects once. */
+    watchFps: function (dt) {
+      if (!this.engine || CT.Storage.getSetting('lowFx') || this.paused) return;
+      this._fpsT = (this._fpsT || 0) + dt; this._fpsN = (this._fpsN || 0) + 1;
+      if (this._fpsT < 6) return;
+      var fps = this._fpsN / this._fpsT; this._fpsT = 0; this._fpsN = 0;
+      if (fps < 22 && !CT.botInput3d && !window.CT_NO_ADAPT) {
+        CT.Storage.setSetting('lowFx', true);
+        this.applyQuality();
+        var c = this.ctrl;
+        if (c && c.kit && c.kit.pipeline) { c.kit.pipeline.dispose(); c.kit.pipeline = null; }
+        if (c && c.kit && c.kit.shadowGen) c.kit.shadowGen.getShadowMap().refreshRate = 2;
+        CT.UI.achToast('Low effects switched on for smoother play (change it in Pause)');
+      }
+    },
     frame: function (dt) {
       var c = this.ctrl;
       if (!c || this.lost) return;
+      this.watchFps(dt);
       try {
         if (!this.paused) c.update(dt);
         if (c.scene && this.engine) { this.engine.beginFrame(); c.scene.render(); this.engine.endFrame(); }
@@ -93,7 +109,7 @@
     },
     pause: function () { if (this.ctrl && this.ctrl.pause) this.ctrl.pause(); },
     foreground: function () { if (this.ctrl && this.ctrl.autoResume) this.paused = false; },
-    back: function () { if (this.ctrl && this.ctrl.back) this.ctrl.back(); },
+    back: function () { return this.ctrl && this.ctrl.back ? this.ctrl.back() : false; },
     fps: function () { return this.engine ? Math.round(this.engine.getFps()) : 0; }
   };
 
@@ -105,10 +121,12 @@
     sc.blockMaterialDirtyMechanism = false;
     var kit = new CT.Kit(sc);
     var hemi = new B.HemisphericLight('hemi', new B.Vector3(0.2, 1, 0.1), sc);
-    hemi.intensity = opt && opt.indoor ? 0.55 : 0.75;
-    hemi.groundColor = new B.Color3(0.38, 0.36, 0.33);
+    // the sky photo (image-based lighting) gives the soft fill light; the sun gives direct light and shadows
+    hemi.intensity = opt && opt.indoor ? 0.35 : 0.25;
+    hemi.groundColor = new B.Color3(0.3, 0.28, 0.25);
     var sun = new B.DirectionalLight('sun', new B.Vector3(-0.45, -1, 0.35), sc);
-    sun.intensity = opt && opt.indoor ? 0.5 : 0.95;
+    sun.intensity = opt && opt.indoor ? 1.6 : 2.6;
+    sun.diffuse = new B.Color3(1, 0.96, 0.9);
     sun.position = new B.Vector3(40, 80, -40);
     if (!kit.lowFx && !(opt && opt.noShadows)) {
       var sg = new B.ShadowGenerator(1024, sun);

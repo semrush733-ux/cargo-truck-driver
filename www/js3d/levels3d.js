@@ -50,8 +50,62 @@
     }
   ];
 
+  // ------------------------------------------------------------------ chapters + generated levels (2..30)
+  var CHAPTERS = [
+    { name: 'Green Valley', theme: 'country', from: 1, to: 6 },
+    { name: 'Mountain Pass', theme: 'country', from: 7, to: 12, mountain: true },
+    { name: 'City Streets', theme: 'city', from: 13, to: 18 },
+    { name: 'Desert Run', theme: 'desert', from: 19, to: 24, mountain: true },
+    { name: 'Snow Peaks', theme: 'snow', from: 25, to: 30, mountain: true }
+  ];
+  function rng(seed) { var s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+  var CARGO = { country: ['box', 'crate', 'sacks', 'fruit'], city: ['box', 'fridge', 'glass', 'crate'], desert: ['barrel', 'gas', 'crate', 'steel'], snow: ['crate', 'barrel', 'fridge', 'box'] };
+
+  function generate(id) {
+    var ch = CHAPTERS.filter(function (c) { return id >= c.from && id <= c.to; })[0] || CHAPTERS[0];
+    var k = id - ch.from, d = Math.min(1, (id - 2) / 28), R = rng(id * 7919 + 17);
+    var segs = [{ len: 110 }], total = 110, target = 600 + d * 1000, curves = 0, sideCliff = R() < 0.5 ? 'R' : 'L';
+    while (total < target) {
+      var r = R(), seg;
+      if (r < 0.3) seg = { len: 70 + Math.round(R() * 90) };
+      else if (r < 0.62) { seg = { len: 90 + Math.round(R() * 60), turn: Math.round((R() < 0.5 ? -1 : 1) * (18 + R() * (25 + d * 45))) }; curves++; }
+      else seg = { len: 100 + Math.round(R() * 50), rise: Math.round((R() < 0.55 ? 1 : -1) * (5 + R() * (6 + d * 12))) };
+      if (ch.mountain && (seg.turn || seg.rise > 0) && R() < 0.7) {
+        seg.cliff = sideCliff; seg.rail = R() < (0.65 - d * 0.35); if (R() < 0.4) sideCliff = sideCliff === 'R' ? 'L' : 'R';
+        if (!seg.rise) seg.rise = Math.round(4 + R() * 8);
+      }
+      var sr = R();
+      if (sr < 0.16 && k > 0) seg.type = ch.theme === 'snow' ? 'ice' : ch.theme === 'city' ? 'narrow' : ch.theme === 'desert' ? 'rough' : 'mud';
+      else if (sr < 0.24 && !seg.cliff && !seg.turn && ch.theme !== 'city') seg.type = 'bridge';
+      else if (sr < 0.3 && ch.theme === 'city') seg.type = 'rough';
+      if (seg.type === 'bridge') { delete seg.rise; }
+      segs.push(seg); total += seg.len;
+    }
+    segs.push({ len: 170 });
+    total += 170;
+    var obstacles = [], nb = 1 + Math.round(d * 3) + (ch.theme === 'city' ? 2 : 0), np = Math.round(d * 3);
+    for (var i = 0; i < nb; i++) obstacles.push({ type: 'bump', s: Math.round(150 + (total - 360) * (i + 0.5) / nb) });
+    for (var j = 0; j < np; j++) obstacles.push({ type: 'pothole', s: Math.round(200 + R() * (total - 420)), lane: R() < 0.7 ? 'R' : 'L' });
+    var pool = CARGO[ch.theme] || CARGO.country, cargo = [];
+    for (var c = 0; c < 3; c++) cargo.push(pool[Math.floor(R() * (1 + Math.min(pool.length - 1, k)))]);
+    var speed = 12 + d * 3;
+    var par = Math.round(total / speed + curves * 1.5 + 12);
+    var weather = ch.theme === 'snow' ? (R() < 0.5 ? 'fog' : 'clear') : ch.theme === 'desert' ? 'clear' : (R() < 0.18 + d * 0.15 ? 'rain' : 'clear');
+    return {
+      id: id, name: ch.name + ' ' + (k + 1), chapter: CHAPTERS.indexOf(ch), theme: ch.theme, weather: weather,
+      segments: segs, obstacles: obstacles, cargo: cargo,
+      traffic: id >= 3 ? { density: Math.min(1, 0.25 + d * 0.75 + (ch.theme === 'city' ? 0.2 : 0)) } : null,
+      par: par, timeLimit: id >= 8 ? Math.round(par * 1.7) : null, fuel: 0.3 + d * 0.2
+    };
+  }
+  var tutorial = LEVELS[0];
+  LEVELS = [tutorial];
+  for (var n = 2; n <= 30; n++) LEVELS.push(generate(n));
+
   CT.Levels3D = {
     LIST: LEVELS,
+    CHAPTERS: CHAPTERS,
+    generate: generate,
     COUNT: LEVELS.length,
     get: function (id) { for (var i = 0; i < LEVELS.length; i++) if (LEVELS[i].id === id) return LEVELS[i]; return null; },
     isUnlocked: function (id) { return id === 1 || CT.UNLOCK_ALL || !!(CT.Storage.getLevel3d(id - 1) && CT.Storage.getLevel3d(id - 1).completed); },

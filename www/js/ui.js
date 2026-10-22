@@ -63,11 +63,11 @@
       el.levelChipName = document.querySelector('.level-chip .lvl-name');
       el.pedals = { gas: document.querySelector('.pedal-gas'), brake: document.querySelector('.pedal-brake'), reverse: document.querySelector('.pedal-reverse'), lane: el.laneBtns };
 
-      tap(el.btnPlay, function () { UI.play(CT.Levels.nextToPlay()); });
+      tap(el.btnPlay, function () { UI.goFullscreen(); CT.Game3D_play(CT.Levels3D.nextToPlay()); });      // the whole game is 3D now
       tap(el.btnSettings, function () { UI.openSettings(); });
       tap(el.btnSoundMenu, function () { UI.toggleSound(); });
       tap(el.btnSoundPause, function () { UI.toggleSound(); });
-      tap(el.btnLevels, function () { UI.openLevels(); });
+      tap(el.btnLevels, function () { UI.open3d(); });
       tap(el.btnGarage, function () { UI.openGarage('menu'); });
       tap(el.btnMissions, function () { UI.openMissions(); });
       tap(el.btnAchievements, function () { UI.openAchievements(); });
@@ -178,20 +178,30 @@
 
     // ------------------------------------------------------------ 3D level select (+ truck choice)
     open3d: function () {
-      var html = '', cur = CT.Levels3D.nextToPlay();
+      var html = '', cur = CT.Levels3D.nextToPlay(), chap = -1;
       CT.Levels3D.LIST.forEach(function (L) {
+        var ci = L.chapter || 0;
+        if (ci !== chap) {
+          if (chap >= 0) html += '</div></div>';
+          chap = ci;
+          var C = CT.Levels3D.CHAPTERS[ci], st = 0;
+          for (var q = C.from; q <= C.to; q++) { var rq = CT.Storage.getLevel3d(q); st += rq ? rq.stars : 0; }
+          html += '<div class="chapter ch-' + C.theme + '"><h3>' + (ci + 1) + '. ' + C.name.toUpperCase() + ' <span>★ ' + st + '/' + (C.to - C.from + 1) * 3 + '</span></h3><div class="l3d-grid">';
+        }
         var ok = CT.Levels3D.isUnlocked(L.id), rec = CT.Storage.getLevel3d(L.id);
         var tags = [L.tutorial ? 'Tutorial' : null, L.theme === 'snow' ? 'Snow' : L.theme === 'desert' ? 'Desert' : null, L.weather !== 'clear' ? (L.weather === 'rain' ? 'Rain' : 'Fog') : null,
           L.segments.some(function (sg) { return sg.cliff; }) ? 'Mountain' : null, L.segments.some(function (sg) { return sg.type === 'bridge'; }) ? 'Bridge' : null].filter(Boolean).join(' · ');
         html += ok ? '<button type="button" class="l3d' + (L.id === cur ? ' current' : '') + '" data-l3="' + L.id + '"><b>' + L.id + '</b><span>' + L.name + '</span><small>' + tags + '</small>' + miniStars(rec ? rec.stars : 0) + '</button>'
           : '<div class="l3d locked"><b>' + L.id + '</b><span>' + L.name + '</span>' + LOCK_SVG + '</div>';
       });
-      el.level3dGrid.innerHTML = html;
+      el.level3dGrid.innerHTML = html + '</div></div>';
       Array.prototype.forEach.call(el.level3dGrid.querySelectorAll('[data-l3]'), function (b) {
         tap(b, function () { UI.goFullscreen(); el.levels3d.hidden = true; CT.Game3D_play(parseInt(b.getAttribute('data-l3'), 10)); });
       });
       CT.Premium.renderPicker(el.truckPick);
       el.levels3d.hidden = false;
+      var curB = el.level3dGrid.querySelector('.current');
+      if (curB) setTimeout(function () { try { curB.scrollIntoView({ block: 'center' }); } catch (e) {} }, 40);
     },
 
     refreshMenu: function () {
@@ -201,10 +211,10 @@
       el.menuCoins.textContent = fmtNum(CT.Storage.getCoins());
       var unclaimed = CT.Progress.unclaimedCount();
       el.missionBadge.hidden = !unclaimed; el.missionBadge.textContent = unclaimed;
-      el.menuStars.textContent = CT.Storage.totalStars();
-      var done = CT.Storage.completedCount();
+      el.menuStars.textContent = CT.Storage.totalStars3d();
+      var done = 0; for (var q = 1; q <= CT.Levels3D.COUNT; q++) { var rq = CT.Storage.getLevel3d(q); if (rq && rq.completed) done++; }
       el.menuDone.textContent = done;
-      el.menuBar.style.width = (done / CT.Levels.COUNT * 100) + '%';
+      el.menuBar.style.width = (done / CT.Levels3D.COUNT * 100) + '%';
     },
 
     // ------------------------------------------------------------ level select
@@ -243,6 +253,7 @@
       if (garageFrom === 'win') el.win.hidden = false;
       else if (garageFrom === 'fail') el.fail.hidden = false;
       game.applyPaint();
+      if (CT.GaragePreview) CT.GaragePreview.dispose();
       this.refreshMenu();
     },
     renderGarage: function () {
@@ -294,12 +305,12 @@
       bind(el.paintList, 'data-paint', function (id) { return G.buyPaint(id); });
       bind(el.wheelList, 'data-wheel', function (id) { return G.buyWheel(id); });
       bind(el.accList, 'data-acc', function (id) { return G.buyAccessory(id); });
-      var cfg = G.truckConfig({ theme: 'country', truck: {} });
-      var snow = G.truckConfig({ theme: 'snow', truck: {} });
+      var kind = CT.Premium.owned() ? CT.Storage.getTruck() : 'classic';
+      var cfg = G.truckConfig3d(kind, { theme: 'country' }), snow = G.truckConfig3d(kind, { theme: 'snow' });
       el.truckStats.innerHTML =
-        '<div>Top speed<br><b>' + Math.round(G.kmh(cfg.maxSpeed)) + ' km/h</b></div>' +
-        '<div>Acceleration<br><b>' + Math.round(cfg.accel / 3.3) + '</b></div>' +
-        '<div>Braking<br><b>' + Math.round(cfg.brake / 23) + '</b></div>' +
+        '<div>Top speed<br><b>' + Math.round(cfg.top * 3.6) + ' km/h</b></div>' +
+        '<div>Acceleration<br><b>' + Math.round(cfg.accel / G.BASE3D[kind].accel * 100) + '%</b></div>' +
+        '<div>Braking<br><b>' + Math.round(cfg.brake / G.BASE3D[kind].brake * 100) + '%</b></div>' +
         '<div>Snow grip<br><b>' + Math.round(snow.grip * 100) + '%</b></div>' +
         '<div>Cargo protection<br><b>' + Math.round((1 - cfg.damageMult) * 100) + '%</b></div>' +
         '<div>Fuel tank<br><b>' + Math.round(cfg.fuelCapacity) + ' L</b></div>';
@@ -380,7 +391,13 @@
     hideSplash: function () { if (el.splash) { el.splash.classList.add('done'); setTimeout(function () { el.splash.hidden = true; }, 500); } },
 
     drawGaragePreview: function () {
-      var c = el.garageCanvas, ctx = c.getContext('2d');
+      if (CT.Load3D.ready() && CT.GaragePreview) {
+        if (el.garageCanvas._ctx2d) {                    // a canvas that was used for 2D cannot switch to WebGL: swap in a fresh one
+          var fresh = el.garageCanvas.cloneNode(false); el.garageCanvas.parentNode.replaceChild(fresh, el.garageCanvas); el.garageCanvas = fresh;
+        }
+        el.garageCanvas.classList.add('g3d'); CT.GaragePreview.show(el.garageCanvas); return;
+      }
+      var c = el.garageCanvas, ctx = c.getContext('2d'); c._ctx2d = true;
       game.applyPaint();
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
       var tr = new CT.Truck(); tr.place(0);
@@ -394,7 +411,8 @@
     showMenu: function () {
       ['hud', 'pause', 'win', 'fail', 'levels', 'garage', 'missions', 'achievements', 'levels3d'].forEach(function (k) { if (el[k]) el[k].hidden = true; });
       UI.resultOwner = '2d';
-      el.menu.hidden = false; el.lockNote.hidden = true;
+      el.menu.hidden = false;
+      if (CT.Load3D.ready() && CT.Menu3D) CT.Menu3D.show(); el.lockNote.hidden = true;
       this.refreshMenu();
       setTimeout(function () { try { el.btnPlay.focus({ preventScroll: true }); } catch (e) {} }, 50);
     },

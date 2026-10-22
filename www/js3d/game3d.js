@@ -31,6 +31,10 @@
     '  <line id="h3Needle" x1="60" y1="70" x2="60" y2="28" stroke="#ff4b3e" stroke-width="4" stroke-linecap="round"/><circle cx="60" cy="70" r="6" fill="#fff"/></svg>' +
     '  <b id="h3Speed">0</b><small>km/h</small></div>' +
     ' <div class="h3-left">' +
+    '  <div class="h3-wheel" id="h3Wheel" role="slider" aria-label="Steering wheel: drag to turn"><svg id="h3WheelSvg" viewBox="0 0 200 200">' +
+    '   <circle cx="100" cy="100" r="88" fill="none" stroke="#1d1f24" stroke-width="22"/><circle cx="100" cy="100" r="88" fill="none" stroke="#3a3e47" stroke-width="14"/>' +
+    '   <circle cx="100" cy="100" r="30" fill="#2a2d34" stroke="#555c69" stroke-width="4"/><path d="M70 100 L18 100 M130 100 L182 100 M100 130 L100 186" stroke="#2a2d34" stroke-width="18" stroke-linecap="round"/>' +
+    '   <rect x="94" y="6" width="12" height="20" rx="4" fill="#ffc21a"/><circle cx="100" cy="100" r="12" fill="#c9ced6"/></svg></div>' +
     '  <button class="h3-btn steer" type="button" data-k3="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15.5 4 7.5 12l8 8 2-2-6-6 6-6z"/></svg></button>' +
     '  <button class="h3-btn steer" type="button" data-k3="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M8.5 4 6.5 6l6 6-6 6 2 2 8-8z"/></svg></button>' +
     ' </div>' +
@@ -46,6 +50,7 @@
     ' <h2 class="modal-title">PAUSED</h2><div class="modal-buttons">' +
     '  <button class="btn btn-green" type="button" data-a3="resume">RESUME</button>' +
     '  <button class="btn btn-orange" type="button" data-a3="restart">RESTART LEVEL</button>' +
+    '  <div class="setting"><span>Steering</span><div class="seg" role="group" aria-label="Steering"><button type="button" data-steer="wheel">WHEEL</button><button type="button" data-steer="buttons">BUTTONS</button></div></div>' +
     '  <label class="setting"><span>Gyro steering <small id="p3GyroNote">(tilt the phone)</small></span><input id="p3Gyro" type="checkbox" class="switch"></label>' +
     '  <label class="setting"><span>Gyro sensitivity <small id="p3SensVal"></small></span><input id="p3Sens" type="range" min="6" max="30" step="1" class="slider"></label>' +
     '  <button class="btn btn-blue" type="button" data-a3="calibrate">CALIBRATE GYRO (hold phone level)</button>' +
@@ -73,6 +78,28 @@
       var up = function (e) { if (hud.pointers[e.pointerId]) { delete hud.pointers[e.pointerId]; el.classList.remove('active'); } };
       el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
       el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    });
+    // steering wheel: drag around its centre; it springs back to straight when released
+    var wheel = $('h3Wheel');
+    hud.wheel = { angle: 0, id: null, grab: 0, start: 0 };
+    var wAngle = function (e) { var r = wheel.getBoundingClientRect(); return Math.atan2(e.clientX - (r.left + r.width / 2), -(e.clientY - (r.top + r.height / 2))); };
+    wheel.addEventListener('pointerdown', function (e) {
+      e.preventDefault(); CT.Audio.unlock();
+      try { wheel.setPointerCapture(e.pointerId); } catch (x) {}
+      hud.wheel.id = e.pointerId; hud.wheel.grab = wAngle(e); hud.wheel.start = hud.wheel.angle;
+      wheel.classList.add('active');
+    });
+    wheel.addEventListener('pointermove', function (e) {
+      if (e.pointerId !== hud.wheel.id) return;
+      var d = wAngle(e) - hud.wheel.grab;
+      while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      hud.wheel.angle = Math.max(-2.4, Math.min(2.4, hud.wheel.start + d));
+      hud.wheel.grab = wAngle(e); hud.wheel.start = hud.wheel.angle;
+    });
+    var wUp = function (e) { if (e.pointerId === hud.wheel.id) { hud.wheel.id = null; wheel.classList.remove('active'); } };
+    wheel.addEventListener('pointerup', wUp); wheel.addEventListener('pointercancel', wUp); wheel.addEventListener('lostpointercapture', wUp);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-steer]'), function (b) {
+      b.addEventListener('click', function () { CT.Storage.setSetting('steerMode', b.getAttribute('data-steer')); CT.Audio.play('click'); if (Game3D.cur) Game3D.cur.applySteerMode(); });
     });
     Array.prototype.forEach.call(document.querySelectorAll('[data-a3]'), function (el) {
       el.addEventListener('click', function (e) { e.preventDefault(); CT.Audio.unlock(); if (Game3D.cur) Game3D.cur.command(el.getAttribute('data-a3')); });
@@ -121,10 +148,13 @@
     this.cargo = new CT.Cargo3D(this.scene, this.kit, this.road, this.truck, L);
     this.cargo.stability = this.cfg.stability;
     this.cargo.setupDock(this.drive);
+    this.crowds = [new CT.Humans3D.Crowd(this.kit, this.road, this.road.startS), new CT.Humans3D.Crowd(this.kit, this.road, (this.road.zone.s1 + this.road.zone.s2) / 2, { seed: 3 })];
+    this.traffic = L.traffic && CT.Traffic3D ? new CT.Traffic3D(this, { density: L.traffic.density * (1 - 0.3 * this.assist) }) : null;
     if (this.kit.shadowGen) this.kit.shadowGen.getShadowMap().refreshRate = this.kit.lowFx ? 2 : 1;
     this.camera = new B.FreeCamera('cam', new V3(0, 8, -12), this.scene);
-    this.camera.minZ = 0.3; this.camera.maxZ = 900;
+    this.camera.minZ = 0.3; this.camera.maxZ = 1800;
     this.scene.activeCamera = this.camera;
+    this.kit.environment(this.road.skyName(), { camera: this.camera, exposure: this.level.weather === 'clear' ? 1.05 : 1.2 });
     this.camMode = CAMS.indexOf(CT.Storage.getSetting('cam3d')) >= 0 ? CT.Storage.getSetting('cam3d') : 'chase';
     this.camPos = null; this.camLook = null;
     this.fuelMax = this.cfg.fuelCapacity; this.fuel = this.fuelMax;
@@ -460,9 +490,12 @@
 
   // ------------------------------------------------------------------ per-frame
   Game3D.prototype.input = function () {
-    var steer = 0;
-    if (held('left')) steer -= 1;
-    if (held('right')) steer += 1;
+    var steer = 0, W = hud.wheel;
+    if (W.id === null && Math.abs(W.angle) > 0.001) W.angle *= Math.pow(0.0015, this.lastDt || 0.016);   // spring back to straight
+    if (Math.abs(W.angle) < 0.01) W.angle = 0;
+    if (W.id !== null || W.angle) steer = W.angle / 2.4;
+    if (held('left')) steer = -1;
+    if (held('right')) steer = 1;
     if (!steer && this.gyroOn && CT.Controls.gyroAvailable) {
       var g = CT.Controls.steerTilt;
       steer = Math.abs(g) < 0.06 ? 0 : g;
@@ -473,6 +506,7 @@
   };
 
   Game3D.prototype.update = function (dt) {
+    this.lastDt = dt;
     if (!this._bound) { this._bound = true; this.bindPointer(); }
     this.t += dt; this.stateTime += dt;
     for (var i = this.timers.length - 1; i >= 0; i--) { var tm = this.timers[i]; tm.t -= dt; if (tm.t <= 0) { this.timers.splice(i, 1); tm.fn(); } }
@@ -496,6 +530,19 @@
         }
       }
     }
+    if (this.traffic) {
+      this.traffic.update(dt, this.truck, d);
+      if (s === ST.DRIVING || s === ST.ARRIVED || s === ST.READY) {
+        var self = this;
+        this.traffic.collide(this.truck, d).forEach(function (h) {
+          d.v *= h.front ? 0.35 : 0.8;
+          self.cargo.jolt(h.rel * 0.5 * (h.front ? 1 : -1), 0, 1.5);
+          self.crash(h.rel, 'Crash! Keep a safe distance and overtake only when the left lane is clear');
+        });
+      }
+    }
+    var tp = this.truck.root.position, near = this.crowds.filter(function (c, i) { return i === 0 ? d.s < 120 : d.s > this.road.zone.s1 - 150; }, this);
+    near.forEach(function (c) { c.update(dt, tp); });
     this.cargo.update(dt, d);
     this.road.update(this.t, this.truck.root);
 
@@ -613,13 +660,14 @@
     var d = this.drive, cam = this.camera, s = this.state, r = this.road;
     var tp = this.truck.root.position, fwd = new V3(Math.sin(d.yaw), 0, Math.cos(d.yaw));
     var portrait = window.innerHeight > window.innerWidth;
-    cam.fov = portrait ? 1.15 : 0.9;
+    var spd = Math.min(1, Math.abs(d.v) / 30);
+    cam.fov = (portrait ? 1.15 : 0.88) + spd * 0.12;
     var pos, look, k = 3.5;
     if (s === ST.LOADING || s === ST.DELIVERING || (s === ST.COMPLETE && this.stateTime < 3)) {
       // side view over the dock: truck, pallets and forklift in frame
       // high view from across the road: truck, pallets, forklift and the warehouse behind them
-      pos = r.world(d.s - (portrait ? 12 : 8), portrait ? -12 : -8, portrait ? 21 : 16);
-      look = r.world(d.s + 1, 9, -4);
+      pos = r.world(d.s - (portrait ? 13 : 10), portrait ? -9 : -6.5, portrait ? 14 : 9.5);
+      look = r.world(d.s + 1.5, 9, -0.5);
       k = 2.5;
     } else if (s === ST.FALLING) {
       pos = this.camPos ? this.camPos.clone() : tp.add(new V3(0, 8, 0));
@@ -712,6 +760,8 @@
         else if (this.inZone) { key = 'rel'; t = 'Let go of the pedals'; sub = 'Stop to deliver'; }
         else if (d.s > z.s2 + 1) { key = 'over'; t = 'A little too far!'; sub = 'Hold R to back into the bay'; tone = 'warn'; }
         else if (z.s1 - d.s < 80) { key = 'near'; t = 'Stop in the green bay'; sub = 'Slow down and BRAKE'; }
+        else if (this.traffic && (this._ahead = this.traffic.ahead(d)) && this._ahead.d < 45 && this._ahead.car.dir > 0 && this._ahead.car.v < d.v + 1) { key = 'traffic'; t = 'Slow vehicle ahead'; sub = 'Brake, or overtake on the left when no car is coming'; tone = 'warn'; }
+        else if (this.traffic && this._ahead && this._ahead.car.dir < 0 && this._ahead.d < 90) { key = 'oncoming'; t = 'Oncoming car!'; sub = 'Steer back to the RIGHT lane'; tone = 'bad'; }
         else { key = 'drive'; t = 'Drive to the ' + 'Delivery Hub'; sub = rem + ' m to go'; }
         break;
       case ST.ARRIVED: key = 'arr'; t = this.recoverable ? 'Cargo on the road!' : 'Perfect stop!'; sub = this.recoverable ? 'Tap RECOVER first' : 'Tap DELIVER to unload'; tone = 'good'; break;
@@ -775,6 +825,9 @@
     if (this._dt !== txt) { this._dt = txt; $('h3Dist').textContent = txt; }
     if (!this._cargoHud || this.t - this._cargoHud > 0.5) { this._cargoHud = this.t; this.updateCargoHud(false); }
     $('h3Gyro').hidden = !(this.gyroOn && CT.Controls.gyroAvailable);
+    var wa = hud.wheel.id !== null ? hud.wheel.angle : d.steer / (d.cfg.steerMax || 0.55) * 2.4;
+    var wr = Math.round(wa * 57.3);
+    if (this._wr !== wr) { this._wr = wr; $('h3WheelSvg').style.transform = 'rotate(' + wr + 'deg)'; }
   };
 
   // ---- tutorial cards (level 1 only)
@@ -798,7 +851,14 @@
   };
 
   // ---- gyro
+  Game3D.prototype.applySteerMode = function () {
+    var mode = CT.Storage.getSetting('steerMode') === 'buttons' ? 'buttons' : 'wheel';
+    hud.root.classList.toggle('steer-wheel', mode === 'wheel');
+    hud.root.classList.toggle('steer-buttons', mode === 'buttons');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-steer]'), function (b) { b.classList.toggle('on', b.getAttribute('data-steer') === mode); });
+  };
   Game3D.prototype.syncGyroUi = function () {
+    this.applySteerMode();
     this.gyroOn = CT.Storage.getSetting('gyro') === true;
     CT.Controls.neutral = CT.Storage.getSetting('gyroNeutral') || 0;
     if (this.gyroOn) CT.Controls.enableGyro(true, function () {});

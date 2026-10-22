@@ -89,12 +89,9 @@
     kit.box('backrest', 1.0, 0.7, 0.08, 0, 0.35, 0, carriage, '#3a3e47');
     kit.box('fork', 0.14, 0.06, 1.25, -0.32, 0.03, 0.65, carriage, '#8a909c');
     kit.box('fork', 0.14, 0.06, 1.25, 0.32, 0.03, 0.65, carriage, '#8a909c');
-    // operator
-    var op = kit.node('op', n, 0, 1.4, -0.35);
-    kit.box('opBody', 0.42, 0.55, 0.3, 0, 0.27, 0, op, '#ff8a1f');
-    kit.box('opVest', 0.44, 0.08, 0.32, 0, 0.35, 0, op, '#e8ff3a');
-    var head = B.MeshBuilder.CreateSphere('opHead', { diameter: 0.3, segments: 6 }, kit.scene); head.parent = op; head.position.y = 0.7; head.material = kit.mat('#c68642');
-    kit.box('opHat', 0.34, 0.12, 0.34, 0, 0.86, 0, op, '#ffd21a');
+    // operator: a seated worker in a hard hat and hi-vis vest
+    var op = CT.Humans3D.make(kit, { pose: 'sit', shirt: '#ff8a1f', vest: true, helmet: '#ffd21a', seed: 5 });
+    op.parent = n; op.position.set(0, 1.42, -0.42);
     this.node = n; this.carriage = carriage; this.wheels = wheels; this.mast = mast;
     this.s = s; this.lat = 12; this.lift = 0;
     this.place();

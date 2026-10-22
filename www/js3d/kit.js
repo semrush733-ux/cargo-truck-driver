@@ -16,13 +16,20 @@
     opt = opt || {};
     var key = hex + '|' + (opt.emissive || '') + '|' + (opt.alpha || 1) + '|' + (opt.spec || 0) + '|' + (opt.unlit ? 1 : 0);
     if (this.mats[key]) return this.mats[key];
-    var m = new B.StandardMaterial('m' + key, this.scene);
-    m.diffuseColor = B.Color3.FromHexString(hex);
-    m.specularColor = new B.Color3(opt.spec || 0.06, opt.spec || 0.06, opt.spec || 0.06);
-    if (opt.spec) m.specularPower = 48;
-    if (opt.emissive) m.emissiveColor = B.Color3.FromHexString(opt.emissive);
-    if (opt.unlit) { m.disableLighting = true; m.emissiveColor = B.Color3.FromHexString(hex); }
-    if (opt.alpha && opt.alpha < 1) m.alpha = opt.alpha;
+    var m;
+    if (opt.unlit) {
+      m = new B.StandardMaterial('m' + key, this.scene);
+      m.disableLighting = true; m.emissiveColor = B.Color3.FromHexString(hex);
+    } else {
+      // physically based so every part reacts to the sky light like the trucks do
+      m = new B.PBRMaterial('m' + key, this.scene);
+      m.albedoColor = B.Color3.FromHexString(hex).toLinearSpace();
+      m.metallic = opt.spec >= 0.4 ? 0.7 : 0;
+      m.roughness = opt.spec >= 0.4 ? 0.3 : 0.75;
+      if (opt.emissive) m.emissiveColor = B.Color3.FromHexString(opt.emissive);
+      m.environmentIntensity = 0.8;
+    }
+    if (opt.alpha && opt.alpha < 1) { m.alpha = opt.alpha; if (m.transparencyMode !== undefined) m.transparencyMode = 2; }
     m.freeze();
     this.mats[key] = m;
     return m;
@@ -61,11 +68,12 @@
     return t;
   };
   Kit.prototype.texMat = function (name, texture, opt) {
-    var m = new B.StandardMaterial(name, this.scene);
-    m.diffuseTexture = texture;
-    m.specularColor = new B.Color3(0.04, 0.04, 0.04);
-    if (opt && opt.emissive) m.emissiveColor = B.Color3.FromHexString(opt.emissive);
-    if (opt && opt.alpha) { m.useAlphaFromDiffuseTexture = true; texture.hasAlpha = true; }
+    var m = new B.PBRMaterial(name, this.scene);
+    m.albedoTexture = texture;
+    m.metallic = 0; m.roughness = opt && opt.rough != null ? opt.rough : 0.8;
+    m.environmentIntensity = 0.7;
+    if (opt && opt.emissive) { m.emissiveTexture = texture; m.emissiveColor = B.Color3.FromHexString(opt.emissive); }
+    if (opt && opt.alpha) { m.useAlphaFromAlbedoTexture = true; texture.hasAlpha = true; }
     if (opt && opt.back) m.backFaceCulling = false;
     return m;
   };
@@ -98,6 +106,105 @@
     p.material = m;
     if (parent) p.parent = parent;
     return p;
+  };
+
+  // ------------------------------------------------------------------ realistic (PBR) materials
+  var ASSET = 'assets/';
+  /** Physically based material: colour, metallic, roughness, optional clear coat (car paint) and alpha (glass). */
+  Kit.prototype.pbr = function (hex, opt) {
+    opt = opt || {};
+    var key = 'p|' + hex + '|' + JSON.stringify(opt);
+    if (this.mats[key]) return this.mats[key];
+    var m = new B.PBRMaterial('p' + key, this.scene);
+    m.albedoColor = B.Color3.FromHexString(hex).toLinearSpace();
+    m.metallic = opt.metal != null ? opt.metal : 0;
+    m.roughness = opt.rough != null ? opt.rough : 0.6;
+    if (opt.coat) { m.clearCoat.isEnabled = true; m.clearCoat.intensity = opt.coat; m.clearCoat.roughness = 0.08; }
+    if (opt.alpha != null && opt.alpha < 1) { m.alpha = opt.alpha; m.transparencyMode = B.PBRMaterial.PBRMATERIAL_ALPHABLEND; }
+    if (opt.emissive) { m.emissiveColor = B.Color3.FromHexString(opt.emissive); m.emissiveIntensity = opt.glow || 1; }
+    m.environmentIntensity = opt.env != null ? opt.env : 1;
+    if (!opt.live) m.freeze();
+    this.mats[key] = m;
+    return m;
+  };
+  /** Cached photo texture from assets/tex (CC0, Poly Haven). */
+  Kit.prototype.photo = function (name, uScale, vScale) {
+    var key = 'ph|' + name + '|' + uScale + '|' + vScale;
+    if (this.mats[key]) return this.mats[key];
+    var t = new B.Texture(ASSET + 'tex/' + name + '.jpg', this.scene, false, true, B.Texture.TRILINEAR_SAMPLINGMODE);
+    t.uScale = uScale || 1; t.vScale = vScale || uScale || 1;
+    t.anisotropicFilteringLevel = this.lowFx ? 1 : 4;
+    this.mats[key] = t;
+    return t;
+  };
+  /** Photo-textured PBR surface (albedo + normal + roughness maps). */
+  Kit.prototype.surface = function (name, scale, opt) {
+    opt = opt || {};
+    var key = 's|' + name + '|' + scale + '|' + JSON.stringify(opt);
+    if (this.mats[key]) return this.mats[key];
+    var m = new B.PBRMaterial('s' + key, this.scene);
+    m.albedoTexture = this.photo(name + '_diff', scale, opt.v || scale);
+    if (opt.tint) m.albedoColor = B.Color3.FromHexString(opt.tint);
+    if (!this.lowFx) {
+      m.bumpTexture = this.photo(name + '_nor_gl', scale, opt.v || scale);
+      m.bumpTexture.level = opt.bump || 1;
+      m.invertNormalMapY = false;
+      m.metallicTexture = this.photo(name + '_rough', scale, opt.v || scale);
+      m.useRoughnessFromMetallicTextureGreen = true; m.useMetallnessFromMetallicTextureBlue = false; m.useAmbientOcclusionFromMetallicTextureRed = false;
+    }
+    m.metallic = opt.metal || 0; m.roughness = opt.rough != null ? opt.rough : 1;
+    m.environmentIntensity = opt.env != null ? opt.env : 0.6;
+    if (opt.back) m.backFaceCulling = false;
+    this.mats[key] = m;
+    return m;
+  };
+  /** Real sky photo + image-based lighting + filmic tone mapping. sky: 'day' | 'clear' | 'overcast' */
+  Kit.prototype.environment = function (sky, opt) {
+    opt = opt || {};
+    var sc = this.scene;
+    try {
+      var env = new B.HDRCubeTexture(ASSET + 'hdri/' + sky + '_env.hdr', sc, 128, false, true, false, true);
+      sc.environmentTexture = env;
+      sc.environmentIntensity = opt.envIntensity || 1;
+    } catch (e) { console.warn('env', e); }
+    if (!opt.noSky) {
+      var dome = new B.PhotoDome('sky', ASSET + 'hdri/' + sky + '_sky.jpg', { resolution: 24, size: 1600, useDirectMipMapping: false }, sc);
+      dome.mesh.applyFog = false; dome.mesh.isPickable = false; dome.mesh.infiniteDistance = true;
+      dome.imageMode = B.PhotoDome.MODE_MONOSCOPIC;
+      if (dome.material) dome.material.backFaceCulling = false;
+      this.dome = dome;
+    }
+    var ip = sc.imageProcessingConfiguration;
+    ip.toneMappingEnabled = true; ip.toneMappingType = B.ImageProcessingConfiguration.TONEMAPPING_ACES;
+    ip.exposure = opt.exposure || 1.05; ip.contrast = 1.15;
+    if (!this.lowFx && !opt.noPipeline) {
+      var cam = opt.camera;
+      if (cam) {
+        var pipe = new B.DefaultRenderingPipeline('pipe', false, sc, [cam]);
+        pipe.fxaaEnabled = true; pipe.samples = 1;
+        pipe.imageProcessingEnabled = false;      // the scene's own image processing (above) stays in charge
+        pipe.bloomEnabled = !!opt.bloom; if (opt.bloom) { pipe.bloomThreshold = 0.85; pipe.bloomWeight = 0.25; pipe.bloomKernel = 32; pipe.bloomScale = 0.5; }
+        this.pipeline = pipe;
+      }
+    }
+  };
+
+  /** Extrudes a closed 2D outline (x = length along the truck, y = height) across the width, with softened ends. */
+  Kit.prototype.profile = function (name, pts, width, mat, parent, opt) {
+    opt = opt || {};
+    var shape = pts.map(function (p) { return new B.Vector3(-p[0], p[1], 0); });   // outline x = truck length (+z)
+    shape.push(shape[0].clone());
+    var half = width / 2, bev = opt.bevel != null ? opt.bevel : 0.06;
+    var path = [new B.Vector3(-half, 0, 0), new B.Vector3(-half + bev, 0, 0), new B.Vector3(half - bev, 0, 0), new B.Vector3(half, 0, 0)];
+    var sc = [1 - bev * 0.9, 1, 1, 1 - bev * 0.9];
+    var m = B.MeshBuilder.ExtrudeShapeCustom(name, {
+      shape: shape, path: path, cap: B.Mesh.CAP_ALL, sideOrientation: B.Mesh.DOUBLESIDE,
+      scaleFunction: function (i) { return sc[i]; }, rotationFunction: function () { return 0; }
+    }, this.scene);
+    m.material = mat;
+    if (parent) m.parent = parent;
+    m.convertToFlatShadedMesh && opt.flat && m.convertToFlatShadedMesh();
+    return m;
   };
 
   Kit.prototype.shadow = function (mesh) {

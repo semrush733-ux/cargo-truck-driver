@@ -29,6 +29,8 @@
     this.camera = new B.FreeCamera('wsCam', new V3(10, 6, START_Z + 14), sc);
     this.camera.minZ = 0.2; this.camera.maxZ = 500;
     sc.activeCamera = this.camera;
+    k.environment('day', { camera: this.camera });
+    sc.fogStart = 120; sc.fogEnd = 600; sc.fogColor = new B.Color3(0.78, 0.86, 0.94);
     this.camPos = this.camera.position.clone(); this.camLook = new V3(0, 2, START_Z);
     this.upgradeTime = CONFIG.upgradeMin + Math.random() * (CONFIG.upgradeMax - CONFIG.upgradeMin);
     this.si = 0; this.st = 0; this.t = 0; this.shutterOpen = 0; this.ran = {};
@@ -49,9 +51,10 @@
     }, { mip: true });
     concrete.uScale = 14; concrete.vScale = 14;
     var g = B.MeshBuilder.CreateGround('yard', { width: 120, height: 120 }, sc);
-    g.material = k.texMat('yardM', concrete); g.receiveShadows = true;
+    g.material = k.surface('concrete', 20, { env: 0.5 }); g.receiveShadows = true;
+    concrete.dispose();
     var grass = B.MeshBuilder.CreateGround('grass', { width: 600, height: 600 }, sc);
-    grass.position.y = -0.05; grass.material = k.mat('#5fa04a');
+    grass.position.y = -0.05; grass.material = k.surface('grass', 90, { tint: '#9ccf6a', env: 0.4 }); grass.receiveShadows = true;
     // lane markings to the door
     for (var z = FRONT_Z + 2; z < START_Z + 8; z += 3) k.box('dash', 0.25, 0.02, 1.6, 0, 0.02, z, null, '#ffffff');
     k.box('stopLine', DOOR_W, 0.02, 0.3, 0, 0.02, SHOW_Z - 4.5, null, '#ffd21a');
@@ -139,7 +142,7 @@
     var h = Math.max(0.02, 1 - open);
     this.shutter.scaling.y = h;
     this.shutter.position.y = DOOR_H - DOOR_H * h / 2;
-    this.shutterMat.diffuseTexture.vScale = 3 * h;
+    this.shutterMat.albedoTexture.vScale = 3 * h;
     this.drum.rotation.x = open * 12;
   };
 
@@ -374,6 +377,7 @@
     var el = $('wsUi'); if (el) el.hidden = true;
     CT.Mode3D.stop();
     CT.Workshop3D.running = false;
+    if (CT.Menu3D) CT.Menu3D.show();
     var g = $('garage'); if (g) { CT.UI.openGarage(CT.Workshop3D.from || 'menu'); }
   };
   Workshop.prototype.dispose = function () {

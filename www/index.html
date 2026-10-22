@@ -52,7 +52,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
             <span class="play-text"><span>PLAY</span><small id="playLevel">Level 1</small></span>
           </button>
-          <button id="btnPlay3d" class="btn btn-play3d" type="button" aria-label="Play in 3D">
+          <button id="btnPlay3d" class="btn btn-play3d" type="button" aria-label="Play in 3D" hidden>
             <span class="p3-badge">NEW</span><span class="play-text"><span>3D</span><small id="play3dLevel">Level 1</small></span>
           </button>
           <button id="btnSettings" class="btn btn-icon" type="button" aria-label="Settings">
@@ -77,8 +77,8 @@
       <div class="menu-right">
         <div class="progress-card">
           <div class="pc-row"><span class="coin-ico"></span><b id="menuCoins">0</b><span>cash</span></div>
-          <div class="pc-row"><svg class="pc-star"><use href="#starShape"/></svg><b id="menuStars">0</b><span>/ 150 stars</span></div>
-          <div class="pc-row"><span class="pc-flag"></span><b id="menuDone">0</b><span>/ 50 levels</span></div>
+          <div class="pc-row"><svg class="pc-star"><use href="#starShape"/></svg><b id="menuStars">0</b><span>/ 90 stars</span></div>
+          <div class="pc-row"><span class="pc-flag"></span><b id="menuDone">0</b><span>/ 30 levels</span></div>
           <div class="pc-bar"><i id="menuBar"></i></div>
         </div>
       </div>
@@ -266,7 +266,7 @@
   <section id="levels3d" class="screen modal-wrap" hidden aria-label="3D levels">
     <div class="modal modal-wide">
       <div class="modal-head">
-        <h2 class="modal-title">3D DELIVERIES</h2>
+        <h2 class="modal-title">SELECT LEVEL</h2>
         <button id="btnClose3d" class="btn btn-icon btn-close" type="button" aria-label="Close">✕</button>
       </div>
       <div class="truck-pick" id="truckPick"></div>
