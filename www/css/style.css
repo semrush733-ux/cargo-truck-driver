@@ -520,3 +520,16 @@ svg { fill: currentColor; }
 .hud.cab .banner.hide { transform: translateY(-8px); }
 .modal-win .win-level { margin-top: 4px; }
 .modal-win { padding-top: 40px; }
+.lane-btns { display: flex; gap: 8px; }
+.lane-btns .lane-btn { width: 64px; height: 64px; font-size: 11px; }
+.lane-btns .lane-btn svg { width: 28px; height: 28px; }
+.banner-prog { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.bp-track { flex: 1; min-width: 160px; height: 12px; border-radius: 99px; background: #e8dcc4; overflow: hidden; box-shadow: inset 0 2px 3px rgba(0,0,0,.15); }
+.bp-track i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #f7901e, #ffc24a); transition: width .25s; }
+.banner-prog b { font-family: var(--font-display); font-weight: 400; font-size: 20px; font-variant-numeric: tabular-nums; color: #1d1d22; min-width: 3.2ch; }
+.easy-tag { background: #35b54a; color: #fff; font-size: 11px; font-weight: 900; letter-spacing: .08em; padding: 3px 7px; border-radius: 8px; }
+@media (max-height: 520px) {
+  .lane-btns .lane-btn { width: 52px; height: 52px; }
+  .lane-btns .lane-btn span { display: none; }
+}
+.lane-btns.hint .lane-btn::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 4px solid #ffe066; animation: ring 1.1s ease-out infinite; pointer-events: none; }

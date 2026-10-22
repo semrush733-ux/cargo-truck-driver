@@ -2,12 +2,15 @@
 
 A 2D side-view cargo delivery game built with HTML5 Canvas and vanilla JavaScript. No frameworks and no image files: the truck, the cranes, the warehouses and the scenery are all drawn in code.
 
-**50 playable levels** in 5 chapters: Green Valley, Metro City, Sahara Run, Frozen Pass and Night Express. In every level you load the cargo with the depot crane, drive to the Delivery Hub, stop in the green zone, and the hub crane unloads the cargo.
+**50 playable levels** in 5 chapters: Green Valley, Metro City, Sahara Run, Frozen Pass and Night Express. In every level a team of workers loads the cargo onto your truck while a timer counts down. You drive to the Delivery Hub, stop in the green zone, and the hub workers unload it.
 
 What the game has:
 - **Traffic.** Two lanes with cars, vans, pickups and buses. Tap **LANE** to overtake. Traffic lights must be obeyed, and running a red costs the "Safe driving" star.
 - **Challenges.** Hills (they get steeper level by level), sharp bends with speed limits (taking one too fast damages the cargo), speed bumps, snow with low grip, desert sand, night driving with headlights, and time limits from level 8.
-- **Cargo types.** Boxes, crates, barrels, steel (heavy, so slower acceleration) and fragile glass (double damage).
+- **Cargo types.** Boxes, rice sacks, fruit crates, wooden crates, oil drums, gas cylinders, glass panels, fridges and steel beams. Every 3rd level is a mixed load. Heavy cargo slows acceleration, and fragile cargo takes more damage.
+- **Real speed feel.** The world moves at the speed the meter shows. High speed adds speed lines, a wider camera view, road rumble, roadside reflector posts and blurred wheels.
+- **Weaving traffic.** Cars put on their indicators and change lanes. Steer with the LEFT and RIGHT buttons.
+- **Help when stuck.** After 2 failures on a level you get EASY mode (more time, less traffic, tougher cargo). After 3 failures you get EASY+.
 - **3 camera views.** SIDE, **TPP** (behind the truck) and **FPP** (inside the cab, with the steering wheel, gauges and mirrors). The camera button is next to Pause, or press C.
 - **Bunny driver.** You can see the bunny through the side window, in the left mirror in TPP, and in the interior rear-view mirror in FPP, where it blinks. Its paws are on the steering wheel.
 - **Stars.** ★ Cargo delivered, ★ Safe driving (no crashes, no red lights, cargo ≥ 90%), ★ Fast delivery (beat the target time). The win screen shows which stars you earned and why.
@@ -43,7 +46,7 @@ You can also double-click `www/index.html`, because the game works from `file://
 | Brake / stop | **BRAKE** pedal | ← or A, Space |
 | Reverse | **REVERSE** button | ↓ or S |
 | Load / Deliver | big centre button | E or Enter |
-| Change lane | **LANE** button / tilt phone (gyro) | ↑ or W |
+| Steer left / right (change lane) | **LEFT / RIGHT** buttons, or tilt the phone (gyro) | ↑ or W toggles |
 | Camera (Side / TPP / FPP) | 👁 button | C |
 | Horn | 📢 button | H |
 | Pause | ⏸ top-right | P or Esc |
@@ -65,7 +68,7 @@ cargo-truck-driver/
 │   ├── js/draw.js            canvas helpers, seeded RNG
 │   ├── js/truck.js           truck physics + truck artwork
 │   ├── js/cargo.js           cargo items, counting, bed physics, box artwork
-│   ├── js/crane.js           pick-and-place crane (loading + unloading)
+│   ├── js/workers.js         worker teams that load/unload the cargo, loading timer
 │   ├── js/world.js           sky, hills, props, warehouses, road, delivery zone
 │   ├── js/effects.js         dust, exhaust, sparkles, confetti, floating text
 │   ├── js/levels.js          level registry + config format (docs inside)

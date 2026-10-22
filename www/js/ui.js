@@ -14,6 +14,7 @@
   var ICONS = { engine: '⚙️', tyres: '🛞', suspension: '🔩', brakes: '🛑' };
   var CAM_LABEL = { side: 'SIDE', chase: 'TPP', cab: 'FPP' };
 
+  function D_clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function fmtTime(sec) {
     sec = Math.max(0, sec);
     var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
@@ -42,7 +43,7 @@
       ['menu', 'hud', 'pause', 'win', 'fail', 'settings', 'levels', 'garage', 'btnPlay', 'playLevel', 'btnSettings', 'btnSoundMenu', 'btnSoundPause',
         'btnLevels', 'btnGarage', 'menuCoins', 'menuStars', 'menuDone', 'menuBar',
         'cargoCount', 'healthBar', 'progFill', 'progTruck', 'distLeft', 'destName', 'speedVal', 'timerChip', 'timerVal', 'btnPause', 'camLabel',
-        'banner', 'bannerTitle', 'bannerSub', 'btnAction', 'actionText', 'actionIcon', 'actionHint', 'lockNote', 'btnLane',
+        'banner', 'bannerTitle', 'bannerSub', 'bannerProg', 'bannerBar', 'bannerTime', 'easyTag', 'btnAction', 'actionText', 'actionIcon', 'actionHint', 'lockNote', 'laneBtns',
         'btnResume', 'btnRestart', 'btnResetTruck', 'btnMenuFromPause',
         'winLevel', 'winStars', 'winCriteria', 'statDist', 'statTime', 'statCoins', 'bestNote', 'btnNext', 'btnWinRestart', 'btnWinGarage', 'btnWinMenu',
         'failTitle', 'failText', 'btnRetry', 'btnFailGarage', 'btnFailMenu',
@@ -53,7 +54,7 @@
       el.cargoChip = document.querySelector('.cargo-chip');
       el.levelChipNum = document.querySelector('.level-chip .lvl-num');
       el.levelChipName = document.querySelector('.level-chip .lvl-name');
-      el.pedals = { gas: document.querySelector('.pedal-gas'), brake: document.querySelector('.pedal-brake'), reverse: document.querySelector('.pedal-reverse'), lane: el.btnLane };
+      el.pedals = { gas: document.querySelector('.pedal-gas'), brake: document.querySelector('.pedal-brake'), reverse: document.querySelector('.pedal-reverse'), lane: el.laneBtns };
 
       tap(el.btnPlay, function () { UI.play(CT.Levels.nextToPlay()); });
       tap(el.btnSettings, function () { UI.openSettings(); });
@@ -106,6 +107,8 @@
       });
       CT.Controls.on('action', function () { game.action(); });
       CT.Controls.on('lane', function (dir) { game.requestLane(dir); });
+      CT.Controls.on('laneLeft', function () { game.requestLane(1); });
+      CT.Controls.on('laneRight', function () { game.requestLane(0); });
       CT.Controls.on('camera', function () { game.cycleCamera(); });
       CT.Controls.on('horn', function () { game.horn(); });
       CT.Controls.on('pause', function () {
@@ -241,15 +244,18 @@
       setTimeout(function () { try { el.btnPlay.focus({ preventScroll: true }); } catch (e) {} }, 50);
     },
 
-    enterLevel: function (L) {
+    enterLevel: function (L, g) {
       last = {};
       ['menu', 'pause', 'win', 'fail', 'levels', 'garage'].forEach(function (k) { el[k].hidden = true; });
       el.hud.hidden = false;
       el.levelChipNum.textContent = L.id;
       el.levelChipName.textContent = L.name;
       el.destName.textContent = L.destination.name;
-      el.timerChip.hidden = !L.timeLimit;
-      el.btnLane.hidden = !L.traffic;
+      el.timerChip.hidden = !g.timeLimit;
+      el.laneBtns.hidden = !L.traffic;
+      el.easyTag.hidden = !g.assist;
+      el.easyTag.textContent = g.assist > 1 ? 'EASY+' : 'EASY';
+      el.bannerProg.hidden = true;
       this.setHealth(100);
       toastUntil = 0;
       el.banner.classList.remove('hide');
@@ -262,6 +268,7 @@
       el.btnPause.hidden = s === ST.LEVEL_COMPLETE || s === ST.LEVEL_FAILED;
       if (s !== ST.LOADING) el.lockNote.hidden = true;
       if (s === ST.LEVEL_COMPLETE) el.banner.classList.add('hide');
+      if (s !== ST.LOADING && s !== ST.DELIVERING) el.bannerProg.hidden = true;
       this.refreshAction(g);
     },
 
@@ -270,18 +277,15 @@
       var b = el.btnAction, mode, text, icon, hint = '', disabled = false;
       switch (s) {
         case ST.LOADING:
-          var avail = g.loadsAvailable(), asked = g.cargo.required - avail;
-          if (avail > 0) { mode = 'load'; text = 'LOAD'; icon = 'load'; hint = 'Item ' + (asked + 1) + ' of ' + g.cargo.required; }
-          else if (g.cargo.loadedCount() >= g.cargo.required) { mode = 'load'; text = 'STRAPPING'; icon = 'wait'; disabled = true; }
-          else { mode = 'load'; text = 'LOADING'; icon = 'wait'; disabled = true; }
+          mode = 'hidden';                                   // workers load by themselves; the timer is in the banner
           break;
         case ST.READY_TO_DRIVE: case ST.DRIVING:
-          var nearZone = g.level && (g.level.tutorial || (g.level.destination.zone.x1 - (g.truck.x + CT.Truck.FRONT)) < 1800);
+          var nearZone = g.level && (g.level.tutorial || (g.level.destination.zone.x1 - (g.truck.x + CT.Truck.FRONT)) < 1800 * CT.K);
           mode = nearZone ? 'deliver' : 'hidden'; text = 'DELIVER'; icon = 'deliver'; disabled = true; hint = 'Stop in the green zone'; break;
         case ST.ARRIVED:
           mode = 'deliver'; text = 'DELIVER'; icon = 'deliver'; hint = 'Tap to unload'; break;
         case ST.DELIVERING:
-          mode = 'deliver'; text = 'UNLOADING'; icon = 'wait'; disabled = true; break;
+          mode = 'hidden'; break;
         default: mode = 'hidden';
       }
       b.hidden = mode === 'hidden';
@@ -320,9 +324,16 @@
       toastTimer = setTimeout(function () { toastUntil = 0; if (game.level) game.updateHints(true); }, 2050);
     },
 
-    setCargo: function (n, total, label, bump) {
+    setCargo: function (n, total, bump) {
       el.cargoCount.textContent = n + '/' + total;
       if (bump) { el.cargoChip.classList.remove('bump'); void el.cargoChip.offsetWidth; el.cargoChip.classList.add('bump'); }
+    },
+    /** Loading / unloading progress with a countdown in the banner. */
+    setProgress: function (frac, secs) {
+      if (el.bannerProg.hidden) el.bannerProg.hidden = false;
+      var w = Math.round(D_clamp(frac, 0, 1) * 100) + '%';
+      if (last.prog !== w) { last.prog = w; el.bannerBar.style.width = w; }
+      setText(el.bannerTime, 'ptime', fmtTime(Math.ceil(Math.max(0, secs))));
     },
     setHealth: function (h, hurt) {
       el.healthBar.style.width = Math.max(0, h) + '%';
@@ -344,10 +355,10 @@
       setText(el.speedVal, 'spd', String(Math.round(Math.abs(CT.Garage.kmh(tr.v)))));
       var cabView = g.use3D() && g.camMode === 'cab';
       if (last.cab !== cabView) { last.cab = cabView; el.hud.classList.toggle('cab', cabView); }
-      var near = (L.destination.zone.x1 - (tr.x + CT.Truck.FRONT)) < 1800;
+      var near = (L.destination.zone.x1 - (tr.x + CT.Truck.FRONT)) < 1800 * CT.K;
       if (last.near !== near) { last.near = near; this.refreshAction(g); }
-      if (L.timeLimit) {
-        var left = L.timeLimit - g.stats.time;
+      if (g.timeLimit) {
+        var left = g.timeLimit - g.stats.time;
         setText(el.timerVal, 'tm', fmtTime(Math.ceil(left)));
         var low = left < 15;
         if (last.low !== low) { last.low = low; el.timerChip.classList.toggle('low', low); }

@@ -522,9 +522,15 @@
     ctx.fillStyle = INK; for (var x = x1 - 20; x < x1 + dk.w; x += 26) { ctx.beginPath(); ctx.moveTo(x, top + 16); ctx.lineTo(x + 12, top); ctx.lineTo(x + 24, top); ctx.lineTo(x + 12, top + 16); ctx.fill(); }
     ctx.restore();
     [x1 + 30, x1 + dk.w - 50].forEach(function (bx) { D.box(ctx, bx, top + 22, 20, 30, 4, '#1d1d22'); });
-    st.dockSlots.forEach(function (s) {
+    st.dockSlots.forEach(function (s, i) {
       D.box(ctx, s.x - 56, s.y, 112, 10, 2, '#b8783e', INK, 3);
       ctx.fillStyle = '#8a5528'; ctx.fillRect(s.x - 50, s.y + 3, 14, 5); ctx.fillRect(s.x - 7, s.y + 3, 14, 5); ctx.fillRect(s.x + 36, s.y + 3, 14, 5);
+      // stock waiting in the warehouse
+      var cols = ['#d49a5e', '#c8894a', '#d8a066'];
+      for (var r = 0; r < 2 - (i % 2); r++) {
+        D.box(ctx, s.x - 48 + r * 8, s.y - 40 - r * 40, 96 - r * 16, 40, 3, cols[(i + r) % 3], INK, 3);
+        ctx.fillStyle = 'rgba(120,70,20,.35)'; ctx.fillRect(s.x - 6 + r * 0, s.y - 40 - r * 40, 12, 40);
+      }
     });
   }
 

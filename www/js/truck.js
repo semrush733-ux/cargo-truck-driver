@@ -12,15 +12,15 @@
   var SLOTS = [1010, 620, 230];    // cargo slot centres (art x), loaded front first
 
   var DEFAULTS = {
-    maxSpeed: 360,      // world units / s
-    accel: 300,
-    brake: 760,
-    reverseMax: 150,
-    reverseAccel: 210,
-    rolling: 46,
+    maxSpeed: 360 * CT.K,      // world units / s
+    accel: 300 * CT.K,
+    brake: 760 * CT.K,
+    reverseMax: 150 * CT.K,
+    reverseAccel: 210 * CT.K,
+    rolling: 46 * CT.K,
     drag: 0.12,
     weightFactor: 0.07, // each unit of cargo weight slows acceleration a little
-    gravity: 520
+    gravity: 520 * CT.K
   };
 
   function Truck(cfg) {
@@ -79,7 +79,7 @@
     var grip = c.grip || 1;
     if (wantBrake) decel += c.brake * (0.35 + 0.65 * grip);
     if (this.throttle > 0.01) {
-      if (v < -2) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
+      if (v < -5) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
       else a += (c.accel / mass) * (0.55 + 0.45 * grip) * this.throttle * Math.max(0, 1 - Math.pow(Math.max(0, v) / c.maxSpeed, 2));
     }
     if (this.revThrottle > 0.01) {
@@ -117,7 +117,7 @@
     this.accelSm += (acc - this.accelSm) * Math.min(1, dt * 10);
 
     // suspension springs
-    var targetPitch = D.clamp(-this.accelSm * 0.00007, -0.03, 0.03);
+    var targetPitch = D.clamp(-this.accelSm * 0.00007 / CT.K, -0.03, 0.03);
     this.pitchV += ((targetPitch - this.pitch) * 120 - this.pitchV * 10) * dt;
     this.pitch += this.pitchV * dt;
     var sr = Math.min(1, Math.abs(v) / c.maxSpeed);
@@ -163,7 +163,7 @@
   var SLATE = '#3b4250', SLATE_LT = '#545c6c';
   var POSTS = [36, 262, 498, 734, 970];
 
-  function wheel(ctx, cx, cy, ang) {
+  function wheel(ctx, cx, cy, ang, blur) {
     D.circle(ctx, cx, cy, WHEEL_R, '#2b2f38', INK, 6);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
     ctx.fillStyle = '#3a404b';
@@ -182,6 +182,16 @@
     ctx.restore();
     D.circle(ctx, cx, cy, 11, '#2b2f38');
     D.circle(ctx, cx - 4, cy - 4, 4, '#6a707c');
+    if (blur > 0.05) {                       // motion blur on the rim at speed
+      ctx.globalAlpha = Math.min(0.85, blur);
+      var bg = ctx.createRadialGradient(cx, cy, 10, cx, cy, 64);
+      bg.addColorStop(0, '#5a5f69'); bg.addColorStop(0.5, '#c9ccd3'); bg.addColorStop(1, '#9ea3ad');
+      D.circle(ctx, cx, cy, 63, bg);
+      ctx.strokeStyle = 'rgba(70,74,84,.6)'; ctx.lineWidth = 3;
+      [24, 40, 54].forEach(function (r) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); });
+      ctx.globalAlpha = 1;
+      D.circle(ctx, cx, cy, 13, '#2b2f38');
+    }
   }
 
   function bodyBack(ctx, t) {
@@ -415,7 +425,8 @@
 
     // wheels stay on the ground
     var self = this;
-    WHEELS.forEach(function (wx) { wheel(ctx, wx, WHEEL_Y, self.wheelAngle); });
+    var blur = D.clamp((Math.abs(this.v) / (500 * CT.K) - 0.25) * 1.4, 0, 1);
+    WHEELS.forEach(function (wx) { wheel(ctx, wx, WHEEL_Y, self.wheelAngle, blur); });
 
     ctx.save();
     ctx.translate(OX, OY + this.bounce / S); ctx.rotate(this.pitch); ctx.translate(-OX, -OY);

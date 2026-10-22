@@ -3,7 +3,7 @@
 (function (CT) {
   'use strict';
   var D = CT.Draw, INK = D.INK;
-  var SEG = 60, N = 96;                 // 96 segments x 60 units ahead
+  var SEG = 90, N = 110;                // 110 segments x 90 units ahead
   var ROAD_HALF = 205, LANE = 75;       // lane centres at +75 (right/near) and -75 (left/far)
   var BUNNY = '#fbfaf7';
 
@@ -17,8 +17,8 @@
     for (var i = 0; i < cs.length; i++) {
       var c = cs[i];
       if (z >= c.x1 && z <= c.x2) {
-        var f = Math.min(1, (z - c.x1) / 260, (c.x2 - z) / 260);
-        return c.dir * c.sharp * 0.00042 * f;
+        var f = Math.min(1, (z - c.x1) / 600, (c.x2 - z) / 600);
+        return c.dir * c.sharp * 0.00024 * f;
       }
     }
     return 0;
@@ -33,7 +33,8 @@
     var elev = function (x) { return -world.heightAt(x); };
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
     var cab = mode === 'cab';
-    var F = Math.min(W, Hh * 1.8) * (cab ? 0.78 : 0.95);
+    var sr = D.clamp(Math.abs(CT.Garage.kmh(tr.v)) / 300, 0, 1);       // 0 … 1 at 300 km/h
+    var F = Math.min(W, Hh * 1.8) * (cab ? 0.78 : 0.95) * (1 - 0.24 * sr);   // wider view at speed
     var tl = truckLat(tr);
     var camZ = cab ? tr.x + CT.Truck.FRONT - 50 : tr.x + CT.Truck.REAR - 620;
     var camLat = cab ? tl - 24 : tl * 0.7;
@@ -41,6 +42,7 @@
     var hz = Hh * (cab ? 0.47 : 0.36);
     // look slightly up/down with the slope ahead so hills read well
     hz += D.clamp((elev(camZ + 700) - elev(camZ)) / 700 * F * 0.55, -Hh * 0.08, Hh * 0.08);
+    if (sr > 0.3) hz += (Math.random() - 0.5) * (sr - 0.3) * (sr - 0.3) * 9;   // road rumble at high speed
 
     // ---- segment table
     var pts = this.pts, zBase = Math.floor((camZ + 8) / SEG) * SEG, xo = 0, dx = 0;
@@ -73,7 +75,7 @@
     });
     if (g.traffic) g.traffic.cars.forEach(function (c) {
       var z = c.x - c.len / 2;
-      if (z > zMin && z < zMax) sprites.push({ z: z, lat: c.lane === 0 ? LANE : -LANE, k: 'car', c: c });
+      if (z > zMin && z < zMax) { var e = c.laneT * c.laneT * (3 - 2 * c.laneT); sprites.push({ z: z, lat: mix(LANE, -LANE, e), k: 'car', c: c }); }
     });
     if (!cab) sprites.push({ z: tr.x + CT.Truck.REAR, lat: tl, k: 'truck' });
     sprites.sort(function (a, b) { return b.z - a.z; });
@@ -110,6 +112,14 @@
             for (var bl = -ROAD_HALF; bl < ROAD_HALF; bl += 60) this.quadZ(ctx, o.x - 20, o.x + 20, a, b, bl, bl + 30, INK);
           }
         }, this);
+        // reflector posts (strong motion cue at speed)
+        if (Math.floor(a.z / SEG) % 3 === 0) {
+          [-1, 1].forEach(function (sd) {
+            var px = a.sx + sd * ROAD_HALF * 1.3 * a.s, pw = Math.max(1.5, 7 * a.s), ph = 46 * a.s;
+            ctx.fillStyle = '#f4f4f4'; ctx.fillRect(px - pw / 2, a.sy - ph, pw, ph);
+            ctx.fillStyle = sd < 0 ? '#ff4b3e' : '#ffb020'; ctx.fillRect(px - pw / 2, a.sy - ph, pw, ph * 0.22);
+          });
+        }
         // warehouses as walls on the left
         stations.forEach(function (st) {
           var bd = st.building;
@@ -125,6 +135,7 @@
     while (si < sprites.length) { this.sprite(ctx, sprites[si], pts, camZ, camLat, camY, F, hz, W, g, night, 0); si++; }
 
     if (night) this.headlights(ctx, pts, tl, camLat, cab);
+    if (sr > 0.35) this.speedLines(ctx, W, Hh, hz, sr, g.t);
     world.drawWeather(ctx, v);
     if (cab) this.cabInterior(ctx, v, g, tl);
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
@@ -452,6 +463,22 @@
     ctx.beginPath(); ctx.moveTo(x - r * 0.18, y + r * 0.62); ctx.quadraticCurveTo(x, y + r * 0.75, x + r * 0.18, y + r * 0.62); ctx.stroke();
   }
   View3D.drawBunnyFace = drawBunnyFace;
+
+  /** Streaks rushing out from the vanishing point. */
+  View3D.prototype.speedLines = function (ctx, W, H, hz, sr, t) {
+    var k = (sr - 0.35) / 0.65, n = Math.round(10 + 34 * k), cx = W / 2, maxR = Math.hypot(W, H) * 0.65;
+    ctx.save(); ctx.lineCap = 'round';
+    for (var i = 0; i < n; i++) {
+      var a = hash(i * 7.13) * Math.PI * 2;
+      if (Math.sin(a) < -0.55) continue;                    // keep the sky mostly clear
+      var ph = (t * (1.4 + 2.6 * k) + hash(i * 3.7)) % 1;
+      var r1 = maxR * (0.25 + ph * 0.75), r2 = r1 + maxR * (0.06 + 0.16 * k);
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.12 + 0.28 * k) * ph + ')';
+      ctx.lineWidth = 1 + 2.5 * ph;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r1, hz + Math.sin(a) * r1 * 0.75); ctx.lineTo(cx + Math.cos(a) * r2, hz + Math.sin(a) * r2 * 0.75); ctx.stroke();
+    }
+    ctx.restore();
+  };
 
   View3D.prototype.headlights = function (ctx, pts, tl, camLat, cab) {
     ctx.save(); ctx.globalCompositeOperation = 'lighter';

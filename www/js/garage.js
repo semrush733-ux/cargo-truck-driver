@@ -56,11 +56,11 @@
       var u = upgrades || CT.Storage.getUpgrades();
       var grip = Math.min(1.05, (THEME_GRIP[level.theme] || 1) + u.tyres * 0.085);
       var cfg = {
-        maxSpeed: 500 + u.engine * 66,          // 500 u/s = 180 km/h … 830 u/s = 299 km/h
-        accel: 330 + u.engine * 46,
-        brake: 920 + u.brakes * 170,
-        reverseMax: 170,
-        reverseAccel: 240,
+        maxSpeed: (500 + u.engine * 66) * CT.K,   // 180 km/h … 299 km/h
+        accel: (330 + u.engine * 46) * CT.K,
+        brake: (920 + u.brakes * 170) * CT.K,
+        reverseMax: 170 * CT.K,
+        reverseAccel: 240 * CT.K,
         grip: grip,
         damageMult: 1 - u.suspension * 0.13,
         suspension: u.suspension

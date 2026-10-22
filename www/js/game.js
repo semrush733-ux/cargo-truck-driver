@@ -1,7 +1,9 @@
-/* game.js — state machine, update loop, traffic/curve/bump/red-light rules, scoring, camera and rendering. */
+/* game.js — state machine, update loop, traffic/curve/bump/red-light rules, worker loading, easy-mode help,
+   scoring, camera, speed effects and rendering. */
 (function (CT) {
   'use strict';
   var D = CT.Draw;
+  var K = CT.K;
 
   var S = {
     MAIN_MENU: 'MAIN_MENU', LOADING: 'LOADING', READY_TO_DRIVE: 'READY_TO_DRIVE', DRIVING: 'DRIVING',
@@ -11,6 +13,7 @@
   var PLAY_STATES = [S.LOADING, S.READY_TO_DRIVE, S.DRIVING, S.ARRIVED, S.DELIVERING];
   var CAMERAS = ['side', 'chase', 'cab'];
   var VIEW_H = 760;
+  var PALLET_Y = 100;
 
   function Game(canvas) {
     this.canvas = canvas;
@@ -21,15 +24,17 @@
     this.t = 0; this.lt = 0;
     this.effects = new CT.Effects();
     this.view3d = new CT.View3D();
-    this.view = { W: 1, H: 1, dpr: 1, scale: 1, groundY: 1, camX: 0, camY: 0, t: 0, lt: 0, shakeX: 0, shakeY: 0 };
+    this.view = { W: 1, H: 1, dpr: 1, scale: 1, baseScale: 1, groundY: 1, camX: 0, camY: 0, t: 0, lt: 0, shakeX: 0, shakeY: 0 };
     this.shake = 0;
     this.fade = 0;
+    this.speedFx = 0;
     this.level = null;
     this.timers = [];
     this.hintKey = '';
     this.zone = { inside: false, ready: false, show: false };
     this.camMode = CAMERAS.indexOf(CT.Storage.getSetting('camera')) >= 0 ? CT.Storage.getSetting('camera') : 'side';
     this.health = 100;
+    this.assist = 0;
     this.setupMenuScene();
   }
 
@@ -43,9 +48,9 @@
     var L = CT.Levels.get(1);
     this.applyPaint();
     this.menuWorld = new CT.World(L);
-    var tr = new CT.Truck({ maxSpeed: 260, accel: 200 });
+    var tr = new CT.Truck({ maxSpeed: 200 * K, accel: 200 * K });
     tr.place(1900, this.menuWorld.heightAt);
-    var cm = new CT.CargoManager(L);
+    var cm = new CT.CargoManager({ cargo: { items: ['crate', 'barrel', 'box'], count: 3 } });
     cm.items.forEach(function (it, i) { cm.placeOnTruck(it, i); it.strap = 1; it.pop = 0; });
     tr.cargoWeight = cm.weightOnTruck();
     this.menuScene = { truck: tr, cargo: cm };
@@ -58,6 +63,14 @@
     this.applyPaint();
     this.level = L;
     this.world = new CT.World(L);
+
+    // easy-mode help after repeated failures
+    var fails = CT.Storage.getFails(L.id);
+    this.assist = L.tutorial ? 0 : fails >= 3 ? 2 : fails >= 2 ? 1 : 0;
+    this.timeLimit = L.timeLimit ? Math.round(L.timeLimit * (1 + 0.3 * this.assist)) : null;
+    this.par = Math.round(L.par * (1 + 0.12 * this.assist));
+    this.damageAssist = 1 - 0.3 * this.assist;
+
     var tr = new CT.Truck(CT.Garage.truckConfig(L));
     tr.minX = L.road.start + 40 - CT.Truck.REAR;
     tr.maxX = L.road.end - 40 - CT.Truck.FRONT;
@@ -65,19 +78,23 @@
     var self = this;
     tr.onImpact = function (speed, dir) { self.onImpact(speed, dir); };
     this.truck = tr;
-    this.cargo = new CT.CargoManager(L);
-    this.loadCrane = new CT.Crane(L.loadStation.crane);
-    this.dropCrane = new CT.Crane(L.destination.crane);
-    this.loadCrane.onSound = this.dropCrane.onSound = function (n) { CT.Audio.play(n); };
+
+    var sx = L.start.x, zc = (L.destination.zone.x1 + L.destination.zone.x2) / 2;
+    this.loadPallets = [0, 1, 2].map(function (i) { return { x: sx - 620 + i * 125, y: PALLET_Y }; });
+    this.dropPallets = [0, 1, 2].map(function (i) { return { x: zc - 650 - i * 125, y: PALLET_Y }; });
+    this.cargo = new CT.CargoManager(L, this.loadPallets);
+    this.loadCrew = new CT.Crew(this, 'load', this.loadPallets);
+    this.loadCrew.assign(this.cargo.items);
+    this.loadCrew.onItem = function (it, counted) { self.onLoaded(it, counted); };
+    this.dropCrew = new CT.Crew(this, 'unload', this.dropPallets);
+    this.dropCrew.onItem = function (it, counted) { self.onDelivered(it, counted); };
+
     this.traffic = L.traffic ? new CT.Traffic(L, this.world) : null;
-    if (this.traffic) this.traffic.init(tr);
+    if (this.traffic) { this.traffic.densityMult = 1 - 0.3 * this.assist; this.traffic.init(tr); }
     this.stats = { time: 0, startX: L.start.x };
     this.health = 100;
     this.crashes = 0; this.violations = 0; this.curveHits = 0; this.bumpHits = 0;
     this.flags = { winShown: false, failShown: false, brakeSqueal: false, curveWarned: {}, timeWarned: false };
-    this.unloadIndex = 0;
-    this.loadQueue = 0;
-    this.unloadDelay = 0;
     this.winTimer = -1; this.failTimer = -1;
     this.smokeT = 0; this.dustT = 0; this.squealT = 0;
     this.lt = 0;
@@ -85,14 +102,19 @@
     this.effects.clear();
     this.zone = { inside: false, ready: false, show: false };
     this.hintKey = '';
-    this.shake = 0; this.fade = 1;
+    this.shake = 0; this.fade = 1; this.speedFx = 0;
     this.result = null; this.failInfo = null;
     CT.Controls.releaseAll();
     this.view.camX = this.cameraTarget(S.LOADING);
     this.view.camY = tr.y;
     this.setState(S.LOADING);
-    CT.UI.enterLevel(L, this.cargo.required);
-    CT.UI.setCargo(0, this.cargo.required, 'Cargo');
+    CT.UI.enterLevel(L, this);
+    CT.UI.setCargo(0, this.cargo.required);
+    // workers start by themselves
+    this.later(0.9, function () { if (self.state === S.LOADING) self.loadCrew.start(); });
+    if (this.assist > 0) {
+      this.later(0.4, function () { CT.UI.toast(self.assist > 1 ? 'Easy mode+: more time, less traffic, tougher cargo' : 'Easy mode: more time and less traffic', 'info'); });
+    }
     return true;
   };
 
@@ -104,6 +126,7 @@
     this.effects.clear();
     this.timers = [];
     this.fade = 1;
+    this.speedFx = 0;
     this.applyPaint();
     this.setState(S.MAIN_MENU);
     CT.UI.showMenu();
@@ -127,6 +150,7 @@
   };
 
   Game.prototype.onEnter = function (s, old) {
+    var self = this;
     switch (s) {
       case S.READY_TO_DRIVE:
         if (old === S.LOADING) {
@@ -142,7 +166,10 @@
       case S.DELIVERING:
         this.cargo.items.forEach(function (it) { if (it.state === CT.CargoManager.STATE.TRUCK) it.strapTarget = 0; });
         CT.Audio.play('strap');
-        this.unloadDelay = 0.7;
+        var onTruck = this.cargo.items.filter(function (it) { return it.state === CT.CargoManager.STATE.TRUCK; })
+          .sort(function (a, b) { return b.slot - a.slot; });               // rear slot to the nearest pallet
+        this.dropCrew.assign(onTruck);
+        this.later(0.35, function () { self.dropCrew.start(); });
         break;
       case S.LEVEL_COMPLETE:
       case S.LEVEL_FAILED:
@@ -204,6 +231,12 @@
     else if (this.state === S.ARRIVED) this.requestDeliver();
   };
 
+  /** Workers start on their own; tapping LOAD only starts them early. */
+  Game.prototype.requestLoad = function () {
+    if (this.state !== S.LOADING) return false;
+    return this.loadCrew.start();
+  };
+
   Game.prototype.cycleCamera = function () {
     var i = (CAMERAS.indexOf(this.camMode) + 1) % CAMERAS.length;
     this.setCamera(CAMERAS[i]);
@@ -213,8 +246,7 @@
     CT.Storage.setSetting('camera', m);
     CT.Audio.play('click');
     CT.UI.setCameraLabel(m);
-    if (this.level && this.isDriving() && m !== 'side') CT.UI.toast(m === 'cab' ? 'Cab view (FPP)' : 'Chase view (TPP)', 'info');
-    else if (this.level && this.isDriving()) CT.UI.toast('Side view', 'info');
+    if (this.level && this.isDriving()) CT.UI.toast(m === 'cab' ? 'Cab view (FPP)' : m === 'chase' ? 'Chase view (TPP)' : 'Side view', 'info');
   };
 
   /** dir: undefined = toggle, 0 = right lane, 1 = left lane */
@@ -233,61 +265,33 @@
     return true;
   };
 
-  Game.prototype.horn = function () {
-    if (!this.level) return;
-    CT.Audio.play('horn');
-  };
+  Game.prototype.horn = function () { if (this.level) CT.Audio.play('horn'); };
 
-  /** Boxes still on the dock that the player has not asked for yet. */
-  Game.prototype.loadsAvailable = function () {
-    var onDock = this.cargo.items.filter(function (i) { return i.state === CT.CargoManager.STATE.DOCK; }).length;
-    var j = this.loadCrane.job;
-    var pendingNow = j && (j.phase === 'toPick' || j.phase === 'lower') ? 1 : 0;
-    return onDock - pendingNow - this.loadQueue;
-  };
-
-  Game.prototype.requestLoad = function () {
-    if (this.state !== S.LOADING) return false;
-    if (this.loadsAvailable() <= 0) return false;
-    CT.Audio.play('click');
-    if (this.loadCrane.busy()) { this.loadQueue++; CT.UI.refreshAction(this); return true; }
-    return this.startLoadJob();
-  };
-
-  Game.prototype.startLoadJob = function () {
-    var item = this.cargo.nextOnDock();
-    var slot = this.cargo.freeSlot();
-    if (!item || slot < 0) return false;
-    var self = this, ST = CT.CargoManager.STATE;
-    this.loadCrane.start({
-      item: item,
-      from: function () { return { x: item.dock.x, y: item.dock.y }; },
-      to: function () { return self.truck.slotWorld(slot); },
-      onAttach: function (it) { it.state = ST.CRANE; },
-      onRelease: function (it) {
-        var counted = self.cargo.placeOnTruck(it, slot);
-        self.truck.cargoWeight = self.cargo.weightOnTruck();
-        self.truck.jolt(30);
-        CT.Audio.play('clunk');
-        self.later(0.18, function () { CT.Audio.play('strap'); });
-        if (counted) {
-          var p = self.truck.slotWorld(slot);
-          self.effects.sparkle(p.x, p.y - 60, 14);
-          self.effects.text(p.x, p.y - 110, '+1', '#ffd34a');
-          CT.UI.setCargo(self.cargo.loadedCount(), self.cargo.required, 'Cargo', true);
-          self.later(0.25, function () { CT.Audio.play('count'); });
-          CT.vibrate(25);
-        }
-      },
-      onDone: function () {
-        if (self.loadQueue > 0 && self.state === S.LOADING) { self.loadQueue--; self.startLoadJob(); }
-        CT.UI.refreshAction(self);
-        self.updateHints(true);
-      }
-    });
-    CT.UI.refreshAction(this);
+  Game.prototype.onLoaded = function (it, counted) {
+    this.truck.cargoWeight = this.cargo.weightOnTruck();
+    this.truck.jolt(30);
+    CT.Audio.play('clunk');
+    var self = this;
+    this.later(0.25, function () { CT.Audio.play('strap'); });
+    if (counted) {
+      var p = this.truck.slotWorld(it.slot);
+      this.effects.sparkle(p.x, p.y - 60, 14);
+      this.effects.text(p.x, p.y - 110, '+1', '#ffd34a');
+      CT.UI.setCargo(this.cargo.loadedCount(), this.cargo.required, true);
+      this.later(0.3, function () { CT.Audio.play('count'); });
+      CT.vibrate(25);
+    }
     this.updateHints(true);
-    return true;
+  };
+
+  Game.prototype.onDelivered = function (it, counted) {
+    if (!counted) return;
+    CT.Audio.play('deliver');
+    this.effects.sparkle(it.x, it.y - 50, 16, '#7dff8a');
+    this.effects.text(it.x, it.y - 110, this.cargo.deliveredCount() + '/' + this.cargo.required, '#7dff8a');
+    CT.UI.setCargo(this.cargo.deliveredCount(), this.cargo.required, true);
+    CT.vibrate(25);
+    this.updateHints(true);
   };
 
   Game.prototype.requestDeliver = function () {
@@ -298,35 +302,9 @@
     return true;
   };
 
-  Game.prototype.startNextUnload = function () {
-    var self = this;
-    var item = this.cargo.nextOnTruck();
-    if (!item || item.strap > 0.02) return;
-    var slot = item.slot;
-    var target = this.level.destination.dockSlots[this.unloadIndex++];
-    this.dropCrane.start({
-      item: item,
-      from: function () { return self.truck.slotWorld(slot); },
-      to: function () { return { x: target.x, y: target.y }; },
-      onAttach: function (it) { self.cargo.liftFromTruck(it); self.truck.cargoWeight = self.cargo.weightOnTruck(); self.truck.jolt(-14); },
-      onRelease: function (it) {
-        it.x = target.x; it.y = target.y; it.rot = 0;
-        if (self.cargo.markDelivered(it)) {
-          CT.Audio.play('deliver');
-          self.effects.sparkle(it.x, it.y - 50, 16, '#7dff8a');
-          self.effects.text(it.x, it.y - 110, self.cargo.deliveredCount() + '/' + self.cargo.required, '#7dff8a');
-          CT.UI.setCargo(self.cargo.deliveredCount(), self.cargo.required, 'Delivered', true);
-          CT.vibrate(25);
-        }
-        self.updateHints(true);
-      }
-    });
-  };
-
   // ================================================================ damage & rules
-  Game.prototype.damage = function (amount, label) {
-    var L = this.level;
-    var mult = (L.cargo.fragile ? 1.8 : 1) * this.truck.cfg.damageMult;
+  Game.prototype.damage = function (amount) {
+    var mult = (this.cargo.fragile ? 1.8 : 1) * this.truck.cfg.damageMult * this.damageAssist;
     var d = amount * mult;
     if (d <= 0) return 0;
     this.health = Math.max(0, this.health - d);
@@ -338,21 +316,22 @@
   };
 
   Game.prototype.onImpact = function (speed, dir) {
-    if (speed < 25) return;
-    var k = Math.min(1, speed / 300);
-    this.cargo.jolt(speed * 0.6, dir > 0 ? 1 : -1);
-    this.truck.jolt(speed * 0.4 * dir);
+    var v = speed / K;
+    if (v < 25) return;
+    var k = Math.min(1, v / 300);
+    this.cargo.jolt(v * 0.6, dir > 0 ? 1 : -1);
+    this.truck.jolt(v * 0.4 * dir);
     this.shake = Math.max(this.shake, 4 + k * 10);
     CT.Audio.play('bump');
     CT.vibrate(Math.round(30 + k * 60));
     var x = this.truck.x + (dir > 0 ? CT.Truck.FRONT : CT.Truck.REAR);
     this.effects.puff(x, this.truck.y, 8);
-    if (speed > 120 && !this.level.tutorial) this.damage((speed - 120) * 0.05, 'wall');
-    if (speed > 80) CT.UI.toast('Bump! Use the brake to stop gently.', 'warn');
+    if (v > 120 && !this.level.tutorial) this.damage((v - 120) * 0.05);
+    if (v > 80) CT.UI.toast('Bump! Use the brake to stop gently.', 'warn');
   };
 
   Game.prototype.crash = function (ev) {
-    var rel = ev.rel;
+    var rel = ev.rel / K;
     if (rel < 25) return;
     var k = Math.min(1, rel / 400);
     this.crashes++;
@@ -364,17 +343,16 @@
     var x = this.truck.x + (ev.front ? CT.Truck.FRONT : CT.Truck.REAR);
     this.effects.puff(x, this.truck.y - 30, 14);
     this.effects.sparkle(x, this.truck.y - 50, 10, '#ffffff');
-    this.damage(8 + rel * 0.07, 'crash');
+    this.damage(8 + rel * 0.07);
     CT.UI.toast('Crash! Keep a safe distance from cars.', 'bad');
   };
 
   Game.prototype.checkRules = function (dt, prevFront, prevX) {
     var L = this.level, tr = this.truck, self = this;
     var front = tr.x + CT.Truck.FRONT;
-    // red lights
     (L.lights || []).forEach(function (l) {
       var stop = l.x - 60;
-      if (prevFront < stop && front >= stop && tr.v > 15) {
+      if (prevFront < stop && front >= stop && tr.v > 15 * K) {
         if (CT.Traffic.lightState(l, self.lt) === 'red') {
           self.violations++;
           CT.Audio.play('alarm');
@@ -383,29 +361,26 @@
         }
       }
     });
-    // speed bumps (front axle)
     (L.obstacles || []).forEach(function (o) {
       if (o.type !== 'bump') return;
-      var wx = tr.x + 170;          // front wheel
-      var pw = prevX + 170;
+      var wx = tr.x + 170, pw = prevX + 170;
       if ((pw < o.x && wx >= o.x) || (pw > o.x && wx <= o.x)) {
         var v = Math.abs(tr.v);
-        tr.jolt(-Math.min(160, v * 0.25));
+        tr.jolt(-Math.min(160, v / K * 0.25));
         CT.Audio.play('bump');
         if (v > o.limit) {
           self.bumpHits++;
-          self.cargo.jolt(v * 0.4, 1);
+          self.cargo.jolt(v / K * 0.4, 1);
           self.shake = Math.max(self.shake, 5);
-          self.damage((v - o.limit) * 0.06, 'bump');
+          self.damage((v - o.limit) / K * 0.06);
           CT.UI.toast('Too fast over the speed bump!', 'warn');
         }
       }
     });
-    // curves
     var c = this.world.curveAt(tr.x);
-    if (c && Math.abs(tr.v) > c.limit + 12) {
-      var over = Math.abs(tr.v) - c.limit;
-      this.damage(over * 0.032 * dt * (1.4 - (tr.cfg.grip || 1) * 0.4), 'curve');
+    if (c && Math.abs(tr.v) > c.limit + 12 * K) {
+      var over = (Math.abs(tr.v) - c.limit) / K;
+      this.damage(over * 0.032 * dt * (1.4 - (tr.cfg.grip || 1) * 0.4));
       this.cargo.jolt(over * dt * 6, c.dir);
       this.squealT -= dt;
       if (this.squealT <= 0) { CT.Audio.play('squeal'); this.squealT = 0.6; }
@@ -420,7 +395,14 @@
   Game.prototype.fail = function (title, text) {
     if (this.flags.failShown || this.flags.winShown) return;
     this.flags.failShown = true;
-    this.failInfo = { title: title, text: text };
+    var n = CT.Storage.addFail(this.level.id);
+    var help = '';
+    if (!this.level.tutorial) {
+      if (n === 2) help = ' Next try is easier: more time, less traffic and tougher cargo.';
+      else if (n >= 3) help = ' Next try is extra easy, you can do it!';
+      else help = ' Fail once more and the level gets easier.';
+    }
+    this.failInfo = { title: title, text: text + help, fails: n };
     this.setState(S.LEVEL_FAILED);
     CT.Audio.play('fail');
     CT.vibrate([80, 60, 80]);
@@ -456,7 +438,7 @@
     var m = this.menuScene;
     m.truck.update(dt, { gas: true, brake: false, reverse: false }, this.menuWorld.heightAt, true);
     m.cargo.update(dt, m.truck.accelSm);
-    if (m.truck.x > 4200) { m.truck.place(1900, this.menuWorld.heightAt); m.truck.v = 220; this.view.camX = this.cameraTarget(S.MAIN_MENU); this.fade = 1; }
+    if (m.truck.x > 9500) { m.truck.place(1900, this.menuWorld.heightAt); m.truck.v = 150 * K; this.view.camX = this.cameraTarget(S.MAIN_MENU); this.fade = 1; }
     this.emitDriveFx(m.truck, dt, 0.6);
   };
 
@@ -476,16 +458,16 @@
     }
     if (drive && !L.tutorial) this.checkRules(dt, prevFront, prevX);
     this.cargo.update(dt, tr.accelSm);
-    this.loadCrane.update(dt);
-    this.dropCrane.update(dt);
+    this.loadCrew.update(dt);
+    this.dropCrew.update(dt);
 
     if (st === S.LOADING) {
-      if (this.cargo.loadedCount() >= this.cargo.required && !this.loadCrane.busy() && this.cargo.allStrapped()) this.setState(S.READY_TO_DRIVE);
+      if (this.cargo.loadedCount() >= this.cargo.required && this.cargo.allStrapped()) this.setState(S.READY_TO_DRIVE);
+      else CT.UI.setProgress(this.cargo.loadedCount() / this.cargo.required, this.loadCrew.remaining() + (this.loadCrew.started ? 0.4 : 1.3));
     } else if (st === S.READY_TO_DRIVE) {
       if (input.gas || input.reverse) this.setState(S.DRIVING);
     }
 
-    // destination detection
     var z = L.destination.zone;
     var rear = tr.x + CT.Truck.REAR, front = tr.x + CT.Truck.FRONT;
     this.zone.inside = rear >= z.x1 - 60 && front <= z.x2 + 60;
@@ -497,23 +479,21 @@
     else if (this.state === S.ARRIVED && !this.zone.ready) this.setState(S.DRIVING);
 
     if (this.state === S.DELIVERING) {
-      if (this.unloadDelay > 0) this.unloadDelay -= dt;
-      else if (!this.dropCrane.busy() && this.cargo.onTruckCount() > 0) this.startNextUnload();
-      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.cargo.required && !this.dropCrane.busy()) {
+      CT.UI.setProgress(this.cargo.deliveredCount() / this.cargo.required, this.dropCrew.remaining());
+      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.cargo.required) {
         this.flags.winShown = true;
         this.completeLevel();
       }
     }
-    // time limit
-    if (L.timeLimit && !ended && this.state !== S.DELIVERING) {
-      var left = L.timeLimit - this.stats.time;
+    if (this.timeLimit && !ended && this.state !== S.DELIVERING && this.state !== S.LOADING) {
+      var left = this.timeLimit - this.stats.time;
       if (left < 15 && !this.flags.timeWarned) { this.flags.timeWarned = true; CT.Audio.play('alarm'); CT.UI.toast('15 seconds left!', 'warn'); }
       if (left <= 0) this.fail("Time's up", 'The delivery took too long. Upgrade the engine for more speed, or take bends and lights more smoothly.');
     }
     if (this.winTimer > 0) { this.winTimer -= dt; if (this.winTimer <= 0) CT.UI.showWin(this.result); }
     if (this.failTimer > 0) { this.failTimer -= dt; if (this.failTimer <= 0) CT.UI.showFail(this.failInfo, this); }
 
-    if (tr.braking && Math.abs(tr.v) > 200) { if (!this.flags.brakeSqueal) { this.flags.brakeSqueal = true; CT.Audio.play('brake'); } }
+    if (tr.braking && Math.abs(tr.v) > 200 * K) { if (!this.flags.brakeSqueal) { this.flags.brakeSqueal = true; CT.Audio.play('brake'); } }
     else if (!tr.braking) this.flags.brakeSqueal = false;
 
     if (drive || this.state === S.DELIVERING) CT.Audio.engineSet(tr.speedRatio(), tr.throttle + tr.revThrottle * 0.7);
@@ -526,22 +506,24 @@
   Game.prototype.completeLevel = function () {
     var L = this.level, time = this.stats.time;
     var safe = this.crashes === 0 && this.violations === 0 && this.health >= 90;
-    var fast = time <= L.par;
+    var fast = time <= this.par;
     var stars = 1 + (safe ? 1 : 0) + (fast ? 1 : 0);
     var saved = CT.Storage.completeLevel(L.id, { stars: stars, time: time });
+    CT.Storage.clearFails(L.id);
     var coins = CT.Garage.reward(L, stars, saved);
     CT.Storage.addCoins(coins);
     var next = CT.Levels.get(L.id + 1);
+    var label = CT.CargoManager.label(L.cargo).toLowerCase();
     this.result = {
       levelId: L.id, levelName: L.name,
       delivered: this.cargo.deliveredCount(), required: this.cargo.required,
       distance: this.truck.distance * CT.Levels.METERS_PER_UNIT,
-      time: time, par: L.par, stars: stars, isBest: saved.isBest, coins: coins,
+      time: time, par: this.par, stars: stars, isBest: saved.isBest, coins: coins,
       health: this.health, crashes: this.crashes, violations: this.violations,
       criteria: [
-        { ok: true, title: 'Cargo delivered', detail: this.cargo.deliveredCount() + '/' + this.cargo.required + ' ' + (L.cargo.label || 'boxes').toLowerCase() },
+        { ok: true, title: 'Cargo delivered', detail: this.cargo.deliveredCount() + '/' + this.cargo.required + ' · ' + label },
         { ok: safe, title: 'Safe driving', detail: 'Cargo ' + Math.round(this.health) + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.violations + ' red light' + (this.violations === 1 ? '' : 's') },
-        { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(L.par) + ')' }
+        { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(this.par) + ')' }
       ],
       hasNext: !!(next && next.implemented)
     };
@@ -568,7 +550,7 @@
       if (this.dustT <= 0) {
         var w = tr.rearWheelWorld();
         this.effects.dust(tr.v > 0 ? w.x - 20 : tr.x + CT.Truck.FRONT - 50, w.y, tr.v > 0 ? 1 : -1, sr);
-        this.dustT = 0.07;
+        this.dustT = 0.06;
       }
     }
   };
@@ -576,18 +558,19 @@
   // ================================================================ hints
   Game.prototype.ahead = function () {
     var L = this.level, tr = this.truck, front = tr.x + CT.Truck.FRONT, out = {}, self = this;
+    var look = 1100 * K;
     (L.lights || []).forEach(function (l) {
       var d = l.x - 60 - front;
-      if (d > 0 && d < 1100 && !out.light) { var s = CT.Traffic.lightState(l, self.lt); if (s !== 'green') out.light = { d: d, s: s }; }
+      if (d > 0 && d < look * 1.4 && !out.light) { var s = CT.Traffic.lightState(l, self.lt); if (s !== 'green') out.light = { d: d, s: s }; }
     });
-    (L.road.curves || []).forEach(function (c) { var d = c.x1 - front; if (d > 0 && d < 1300 && !out.curve) out.curve = { d: d, c: c }; });
-    (L.obstacles || []).forEach(function (o) { var d = o.x - front; if (d > 0 && d < 900 && !out.bump) out.bump = { d: d, o: o }; });
+    (L.road.curves || []).forEach(function (c) { var d = c.x1 - front; if (d > 0 && d < look * 1.4 && !out.curve) out.curve = { d: d, c: c }; });
+    (L.obstacles || []).forEach(function (o) { var d = o.x - front; if (d > 0 && d < look && !out.bump) out.bump = { d: d, o: o }; });
     if (this.traffic) {
       var lane = tr.laneIndex();
       this.traffic.cars.forEach(function (c) {
-        if (c.lane !== lane) return;
+        if (CT.Traffic.carLanes(c).indexOf(lane) < 0) return;
         var d = c.x - c.len / 2 - front;
-        if (d > 0 && d < 700 && c.v < tr.v - 40 && (!out.car || d < out.car.d)) out.car = { d: d, c: c };
+        if (d > 0 && d < 750 * K && c.v < tr.v - 40 * K && (!out.car || d < out.car.d)) out.car = { d: d, c: c };
       });
     }
     return out;
@@ -598,13 +581,12 @@
     var st = this.state, L = this.level, tr = this.truck, z = L.destination.zone, key, title, sub = '', tone = '';
     var remaining = Math.max(0, ((z.x1 + z.x2) / 2 - tr.x) * CT.Levels.METERS_PER_UNIT);
     var kmh = function (v) { return Math.round(CT.Garage.kmh(v)); };
+    var label = CT.CargoManager.label(L.cargo).toLowerCase();
     switch (st) {
       case S.LOADING:
         var n = this.cargo.loadedCount();
-        if (this.loadCrane.busy()) { key = 'loading-busy'; title = 'Loading ' + (L.cargo.label || 'cargo').toLowerCase() + ' ' + Math.min(this.cargo.required, n + 1) + ' of ' + this.cargo.required + '…'; sub = 'The crane is placing it on your truck'; }
-        else if (n === 0) { key = 'load-0'; title = 'Load the cargo onto your truck.'; sub = 'Tap LOAD to lift each item with the crane'; }
-        else if (n < this.cargo.required) { key = 'load-' + n; title = 'Nice! ' + n + '/' + this.cargo.required + ' loaded'; sub = 'Tap LOAD again'; }
-        else { key = 'load-strap'; title = 'Strapping the cargo…'; }
+        if (n >= this.cargo.required) { key = 'load-strap'; title = 'Strapping the cargo…'; }
+        else { key = 'load-' + n; title = 'Workers are loading ' + label; sub = n + '/' + this.cargo.required + ' on the truck'; }
         break;
       case S.READY_TO_DRIVE:
         key = 'ready'; title = "Cargo loaded! Let's drive."; sub = 'Hold GAS to drive to the ' + L.destination.name; tone = 'good';
@@ -615,11 +597,11 @@
         else if (this.zone.inside && Math.abs(tr.v) >= L.delivery.maxSpeed) { key = 'brake'; title = 'You are in the zone!'; sub = 'Hold BRAKE to stop'; tone = 'warn'; }
         else if (this.zone.inside && tr.laneIndex() === -1) { key = 'lanechg'; title = 'Finish the lane change'; }
         else if (this.zone.inside) { key = 'release'; title = 'Let go of the pedals'; sub = 'Stop completely to deliver'; }
-        else if (rear < z.x1 - 60 && front > z.x1 - 1600) { key = 'near'; title = 'Stop in the green zone'; sub = 'Ease off and use BRAKE'; }
-        else if (cv && Math.abs(tr.v) > cv.limit + 12) { key = 'curve-now'; title = 'Too fast for this bend!'; sub = 'Slow down to ' + kmh(cv.limit) + ' km/h'; tone = 'warn'; }
+        else if (rear < z.x1 - 60 && front > z.x1 - 1600 * K) { key = 'near'; title = 'Stop in the green zone'; sub = 'Ease off and use BRAKE'; }
+        else if (cv && Math.abs(tr.v) > cv.limit + 12 * K) { key = 'curve-now'; title = 'Too fast for this bend!'; sub = 'Slow down to ' + kmh(cv.limit) + ' km/h'; tone = 'warn'; }
         else if (A.light && A.light.s === 'red') { key = 'red'; title = 'Red light ahead'; sub = 'Stop before the white line'; tone = 'warn'; }
         else if (A.light) { key = 'yellow'; title = 'Light is changing'; sub = 'Get ready to stop'; tone = 'warn'; }
-        else if (A.car) { key = 'traffic'; title = 'Slow traffic ahead'; sub = 'Brake, or tap LANE to overtake'; tone = 'warn'; }
+        else if (A.car) { key = 'traffic'; title = 'Slow traffic ahead'; sub = 'Brake, or steer LEFT / RIGHT to overtake'; tone = 'warn'; }
         else if (A.curve && Math.abs(tr.v) > A.curve.c.limit) { key = 'curve'; title = 'Bend ahead'; sub = 'Slow to ' + kmh(A.curve.c.limit) + ' km/h'; tone = 'warn'; }
         else if (A.bump && Math.abs(tr.v) > A.bump.o.limit) { key = 'bump'; title = 'Speed bump ahead'; sub = 'Slow to ' + kmh(A.bump.o.limit) + ' km/h'; tone = 'warn'; }
         else if (tr.x < L.start.x - 60) { key = 'wrong'; title = 'The hub is the other way'; sub = 'Hold GAS to drive forward'; tone = 'warn'; }
@@ -629,7 +611,7 @@
         key = 'arrived'; title = 'Perfect stop!'; sub = 'Tap DELIVER to unload'; tone = 'good';
         break;
       case S.DELIVERING:
-        key = 'deliver-' + this.cargo.deliveredCount(); title = 'Unloading… ' + this.cargo.deliveredCount() + '/' + this.cargo.required; sub = 'The hub crane is taking your cargo';
+        key = 'deliver-' + this.cargo.deliveredCount(); title = 'Workers are unloading…'; sub = this.cargo.deliveredCount() + '/' + this.cargo.required + ' delivered';
         break;
       case S.LEVEL_COMPLETE:
         key = 'done'; title = 'DELIVERY SUCCESSFUL!'; tone = 'good';
@@ -654,9 +636,9 @@
     if (state === S.MAIN_MENU) return this.menuScene.truck.x - halfW * 0.22;
     var L = this.level, tr = this.truck, target;
     var s = state === S.PAUSED ? this.prevState : state;
-    if (s === S.LOADING) target = (L.loadStation.dock.x + tr.x) / 2 + 40;
-    else if (s === S.DELIVERING || s === S.LEVEL_COMPLETE) target = (L.destination.dock.x + tr.x) / 2 + 30;
-    else target = tr.x + Math.min(halfW * 0.3, 160) + D.clamp(tr.v * 0.45, -160, 320);
+    if (s === S.LOADING) target = tr.x - 150;
+    else if (s === S.DELIVERING || s === S.LEVEL_COMPLETE) target = tr.x - 300;
+    else target = tr.x + Math.min(halfW * 0.3, 160) + D.clamp(tr.v * 0.2, -160, 480);
     var lo = L.road.start - 260 + halfW, hi = L.road.end + 320 - halfW;
     if (lo < hi) target = D.clamp(target, lo, hi);
     return target;
@@ -665,12 +647,19 @@
   Game.prototype.updateCamera = function (dt) {
     var target = this.cameraTarget(this.state);
     var k = this.state === S.MAIN_MENU ? 4 : 2.6;
-    if (this.state !== S.MAIN_MENU && Math.abs(this.truck.v) > 400) k = 4;
+    var inLevel = this.state !== S.MAIN_MENU && this.truck;
+    if (inLevel && Math.abs(this.truck.v) > 300 * K) k = 5;
     this.view.camX += (target - this.view.camX) * Math.min(1, dt * k);
     var ty = this.state === S.MAIN_MENU ? this.menuScene.truck.y : this.truck.y;
     this.view.camY += (ty - this.view.camY) * Math.min(1, dt * 3);
-    this.view.shakeX = this.shake ? (Math.random() - 0.5) * this.shake : 0;
-    this.view.shakeY = this.shake ? (Math.random() - 0.5) * this.shake : 0;
+    // speed feel: zoom out a little and rumble at high speed
+    var fx = inLevel ? D.clamp(Math.abs(CT.Garage.kmh(this.truck.v)) / 300, 0, 1) : 0;
+    this.speedFx += (fx - this.speedFx) * Math.min(1, dt * 2);
+    this.view.scale = this.view.baseScale * (1 - 0.14 * this.speedFx);
+    var rumble = this.speedFx > 0.45 ? (this.speedFx - 0.45) * 3 : 0;
+    var sh = this.shake + rumble;
+    this.view.shakeX = sh ? (Math.random() - 0.5) * sh : 0;
+    this.view.shakeY = sh ? (Math.random() - 0.5) * sh : 0;
   };
 
   Game.prototype.resize = function (w, h, dpr) {
@@ -678,9 +667,10 @@
     v.W = w; v.H = h; v.dpr = dpr;
     var portrait = h > w * 1.05;
     var short = !portrait && h < 520;
-    v.scale = Math.min(h / (short ? 900 : VIEW_H), w / 980);
-    if (portrait) v.scale = w / 900;
-    v.groundY = portrait ? h * 0.6 : short ? h * 0.63 : h * 0.745;
+    v.baseScale = Math.min(h / (short ? 900 : VIEW_H), w / 980);
+    if (portrait) v.baseScale = w / 900;
+    v.scale = v.baseScale * (1 - 0.14 * this.speedFx);
+    v.groundY = portrait ? h * 0.6 : short ? h * 0.6 : h * 0.7;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
   };
@@ -695,7 +685,6 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (this.use3D()) {
       this.view3d.render(ctx, v, this, this.camMode);
-      CT.World.setLayer(ctx, v, 1);
       if (this.fade > 0) this.drawFade(ctx);
       return;
     }
@@ -709,20 +698,8 @@
     world.drawVerge(ctx, v);
     world.drawProps(ctx, v);
     world.drawStations(ctx, v);
-
-    CT.World.setLayer(ctx, v, 1);
-    if (!inMenu) { this.loadCrane.drawStructure(ctx); this.dropCrane.drawStructure(ctx); }
-    else this.drawMenuCranes(ctx);
-    cargo.drawWorld(ctx, function (it) { return it.state === ST.DOCK || it.state === ST.STORED; });
-
     world.drawRoad(ctx, v, inMenu ? null : this.zone);
 
-    CT.World.setLayer(ctx, v, 1);
-    if (!inMenu) {
-      this.loadCrane.drawRig(ctx);
-      this.dropCrane.drawRig(ctx);
-      cargo.drawWorld(ctx, function (it) { return it.state === ST.CRANE; });
-    }
     var drawTruck = function () {
       CT.World.setLayer(ctx, v, 1);
       truck.draw(ctx, {
@@ -738,12 +715,38 @@
 
     world.drawForeground(ctx, v);
     CT.World.setLayer(ctx, v, 1);
+    if (!inMenu) {
+      this.loadCrew.drawPallets(ctx);
+      this.dropCrew.drawPallets(ctx);
+      cargo.drawWorld(ctx, function (it) { return it.state === ST.DOCK || it.state === ST.STORED; });
+      this.loadCrew.draw(ctx, this.t);
+      this.dropCrew.draw(ctx, this.t);
+    }
     this.effects.draw(ctx, this.t);
 
     if (!inMenu && this.zone.show) world.drawGuide(ctx, v, this.zone);
     world.drawWeather(ctx, v);
+    this.drawSpeedStreaks(ctx);
     if (!inMenu && (this.state === S.DRIVING || this.state === S.READY_TO_DRIVE)) this.drawEdgeIndicator(ctx);
     if (this.fade > 0) this.drawFade(ctx);
+  };
+
+  /** Horizontal wind streaks in the side view at high speed. */
+  Game.prototype.drawSpeedStreaks = function (ctx) {
+    var fx = this.speedFx;
+    if (fx < 0.4 || !this.truck || this.state === S.MAIN_MENU) return;
+    var v = this.view, k = (fx - 0.4) / 0.6, n = Math.round(8 + 22 * k);
+    ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+    ctx.lineCap = 'round';
+    for (var i = 0; i < n; i++) {
+      var h1 = Math.abs(Math.sin(i * 91.7)) % 1, h2 = Math.abs(Math.sin(i * 37.3)) % 1;
+      var y = v.H * (0.12 + 0.8 * h1);
+      var len = v.W * (0.08 + 0.18 * k) * (0.5 + h2);
+      var x = v.W - ((this.t * v.W * (1.6 + 2.4 * k) * (0.6 + h2) + h2 * v.W * 3) % (v.W + len * 2)) + len;
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.1 + 0.25 * k) * (0.4 + h2 * 0.6) + ')';
+      ctx.lineWidth = 1 + 2 * h2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+    }
   };
 
   Game.prototype.drawFade = function (ctx) {
@@ -751,14 +754,6 @@
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
     ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, this.fade) * 0.9 + ')';
     ctx.fillRect(0, 0, v.W, v.H);
-  };
-
-  Game.prototype.drawMenuCranes = function (ctx) {
-    if (!this._menuCranes) {
-      var L = CT.Levels.get(1);
-      this._menuCranes = [new CT.Crane(L.loadStation.crane), new CT.Crane(L.destination.crane)];
-    }
-    this._menuCranes.forEach(function (c) { c.drawStructure(ctx); c.drawRig(ctx); });
   };
 
   Game.prototype.drawEdgeIndicator = function (ctx) {
@@ -775,7 +770,8 @@
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-30, -24); ctx.lineTo(-30, -10); ctx.lineTo(-62, -10); ctx.lineTo(-62, 10); ctx.lineTo(-30, 10); ctx.lineTo(-30, 24); ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.font = '20px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 5; ctx.strokeText(meters + ' m', -70, 1); ctx.fillStyle = '#fff'; ctx.fillText(meters + ' m', -70, 1);
+    var txt = meters >= 1000 ? (meters / 1000).toFixed(1) + ' km' : meters + ' m';
+    ctx.lineWidth = 5; ctx.strokeText(txt, -70, 1); ctx.fillStyle = '#fff'; ctx.fillText(txt, -70, 1);
     ctx.restore();
   };
 

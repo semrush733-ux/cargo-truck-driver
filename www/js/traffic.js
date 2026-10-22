@@ -40,68 +40,101 @@
   Traffic.prototype.makeCar = function (x, lane, v) {
     var t = this.pickType(), c = this.cfg;
     var vMax = c.speedMin + this.rnd() * (c.speedMax - c.speedMin);
-    if (lane === 1) vMax += 40;                 // left lane is a bit faster
+    if (lane === 1) vMax += 40 * CT.K;          // left lane is a bit faster
     if (t.id === 'bus') vMax *= 0.8;
     return { id: this.nextId++, type: t, x: x, lane: lane, v: v == null ? vMax * 0.8 : v, vMax: vMax, len: t.len,
-      color: COLORS[Math.floor(this.rnd() * COLORS.length)], wheel: 0, braking: false, alpha: 1, exiting: false };
+      color: COLORS[Math.floor(this.rnd() * COLORS.length)], wheel: 0, braking: false, alpha: 1, exiting: false,
+      laneT: lane, laneCd: 2 + this.rnd() * 4, signal: 0 };
   };
 
-  Traffic.prototype.spaceFree = function (x, lane, len, truck) {
-    var ok = this.cars.every(function (c) { return c.lane !== lane || Math.abs(c.x - x) > (c.len + len) / 2 + 220; });
+  Traffic.prototype.spaceFree = function (x, lane, len, truck, gapAhead, gapBehind) {
+    var K = CT.K, ga = gapAhead || 220, gb = gapBehind || 220;
+    var ok = this.cars.every(function (c) {
+      if (Math.round(c.laneT) !== lane && c.lane !== lane) return true;
+      return c.x > x ? (c.x - c.len / 2) - (x + len / 2) > ga : (x - len / 2) - (c.x + c.len / 2) > gb;
+    });
     if (ok && truck) {
-      var tl = truck.laneIndex();
-      if (tl === lane || tl === -1) ok = x - len / 2 > truck.x + CT.Truck.FRONT + 250 || x + len / 2 < truck.x + CT.Truck.REAR - 250;
+      var lanes = truck.lanesOccupied();
+      if (lanes.indexOf(lane) >= 0) ok = x - len / 2 > truck.x + CT.Truck.FRONT + 250 * K || x + len / 2 < truck.x + CT.Truck.REAR - 250 * K;
     }
     return ok;
   };
 
   Traffic.prototype.init = function (truck) {
     if (!this.cfg) return;
-    var n = this.cfg.density;
+    var K = CT.K, n = this.density();
     for (var i = 0; i < n * 3 && this.cars.length < n; i++) {
-      var x = truck.x + 1600 + this.rnd() * 4200;
+      var x = truck.x + 1600 * K + this.rnd() * 4200 * K;
       var lane = this.rnd() < 0.5 ? 0 : 1;
       if (x < this.cfg.exitX - 300 && this.spaceFree(x, lane, 260, truck)) this.cars.push(this.makeCar(x, lane));
     }
   };
 
+  /** Cars kept around the truck (lower when the player gets easy-mode help). */
+  Traffic.prototype.density = function () { return Math.max(1, Math.round(this.cfg.density * (this.densityMult || 1))); };
+
   Traffic.prototype.front = function (c) { return c.x + c.len / 2; };
   Traffic.prototype.rear = function (c) { return c.x - c.len / 2; };
+  /** Lanes a car is touching (both while it changes lane). */
+  function carLanes(c) { return c.laneT > 0.2 && c.laneT < 0.8 ? [0, 1] : [Math.round(c.laneT)]; }
+  Traffic.carLanes = carLanes;
 
   Traffic.prototype.update = function (dt, truck, t) {
     if (!this.cfg) return;
-    var self = this, cars = this.cars, exitX = this.cfg.exitX;
-    var tLane = truck.laneIndex();
+    var self = this, cars = this.cars, exitX = this.cfg.exitX, K = CT.K;
+    var tLanes = truck.lanesOccupied();
     var tFront = truck.x + CT.Truck.FRONT, tRear = truck.x + CT.Truck.REAR;
+    var weave = (this.cfg.weave || 0.3) * (this.densityMult || 1);
 
     cars.forEach(function (c) {
       var target = c.vMax, cf = c.x + c.len / 2;
-      // leader in the same lane (car or truck)
+      var myLanes = carLanes(c);
+      if (myLanes.indexOf(c.lane) < 0) myLanes.push(c.lane);
+      // leader in my lane(s): car or truck
       var gap = Infinity, leadV = 0;
       cars.forEach(function (o) {
-        if (o === c || o.lane !== c.lane || o.x <= c.x) return;
+        if (o === c || o.x <= c.x) return;
+        var ol = carLanes(o);
+        if (!ol.some(function (l) { return myLanes.indexOf(l) >= 0; })) return;
         var g = o.x - o.len / 2 - cf;
         if (g < gap) { gap = g; leadV = o.v; }
       });
-      if ((tLane === c.lane || tLane === -1) && tRear > c.x) {
+      if (tLanes.some(function (l) { return myLanes.indexOf(l) >= 0; }) && tRear > c.x) {
         var g2 = tRear - cf;
         if (g2 < gap) { gap = g2; leadV = Math.max(0, truck.v); }
       }
-      var safe = 80 + c.v * 0.85;
-      if (gap < safe) target = Math.min(target, Math.max(0, leadV * D.clamp((gap - 40) / safe, 0, 1)));
-      if (gap < 40) target = 0;
+      var safe = 80 * K + c.v * 0.7;
+      if (gap < safe) target = Math.min(target, Math.max(0, leadV * D.clamp((gap - 40 * K) / safe, 0, 1)));
+      if (gap < 40 * K) target = 0;
       // traffic lights
       self.lights.forEach(function (l) {
         var stop = l.x - 60, dist = stop - cf;
-        if (dist < -10 || dist > 600) return;
+        if (dist < -10 || dist > 1500 * K) return;
         var s = lightState(l, t);
         if (s === 'green') return;
-        var stopDist = c.v * c.v / (2 * 600);
-        if (s === 'yellow' && stopDist > dist - 5) return;     // too close to stop: go through
-        target = Math.min(target, Math.max(0, (dist - 10) * 1.6));
+        var stopDist = c.v * c.v / (2 * 600 * K);
+        if (s === 'yellow' && stopDist > dist - 5) return;
+        target = Math.min(target, Math.sqrt(2 * 520 * K * Math.max(0, dist - 10)));
       });
-      if (c.v < target) c.v = Math.min(target, c.v + 230 * dt);
-      else c.v = Math.max(target, c.v - 720 * dt);
+      // lane changes: overtake a slow leader, or weave now and then
+      c.laneCd -= dt;
+      if (c.signal > 0) {
+        c.signal -= dt;
+        if (c.signal <= 0) {
+          var other = 1 - c.lane;
+          if (self.spaceFree(c.x, other, c.len, truck, 160 * K, 220 * K)) c.lane = other;
+          c.laneCd = 3 + self.rnd() * 5;
+        }
+      } else if (c.laneCd <= 0 && Math.abs(c.laneT - c.lane) < 0.01 && !c.exiting && c.type.id !== 'bus') {
+        var blocked = gap < safe * 1.6 && leadV < c.vMax - 30 * K;
+        if ((blocked && self.rnd() < 0.6) || self.rnd() < weave * 0.25) {
+          if (self.spaceFree(c.x, 1 - c.lane, c.len, truck, 160 * K, 220 * K)) c.signal = 0.9;
+        }
+        c.laneCd = 1.2 + self.rnd() * 2;
+      }
+      c.laneT = D.approach(c.laneT, c.lane, dt * 1.1);
+      if (c.v < target) c.v = Math.min(target, c.v + 230 * K * dt);
+      else c.v = Math.max(target, c.v - 720 * K * dt);
       c.braking = target < c.v - 5 || (c.v < 5 && target < 5);
       c.x += c.v * dt;
       c.wheel += c.v * dt / 22;
@@ -109,13 +142,12 @@
       if (c.exiting) c.alpha = Math.max(0, c.alpha - dt * 1.5);
     });
 
-    // recycle cars far behind / exited, keep density around the truck
     for (var i = cars.length - 1; i >= 0; i--) {
-      if (cars[i].alpha <= 0 || cars[i].x < truck.x - 3000) cars.splice(i, 1);
+      if (cars[i].alpha <= 0 || cars[i].x < truck.x - 3000 * K) cars.splice(i, 1);
     }
-    var need = this.cfg.density - cars.length;
+    var need = this.density() - cars.length;
     for (var k = 0; k < need && k < 2; k++) {
-      var x = truck.x + 2600 + this.rnd() * 1800;
+      var x = truck.x + 2600 * K + this.rnd() * 1800 * K;
       var lane = this.rnd() < 0.5 ? 0 : 1;
       if (x < exitX - 300 && this.spaceFree(x, lane, 260, truck)) cars.push(this.makeCar(x, lane));
     }
@@ -123,12 +155,12 @@
 
   /** Can the truck move into `lane` right now? */
   Traffic.prototype.laneFree = function (truck, lane) {
-    var tf = truck.x + CT.Truck.FRONT + 60, tr = truck.x + CT.Truck.REAR - 60;
+    var K = CT.K, tf = truck.x + CT.Truck.FRONT + 60 * K, tr = truck.x + CT.Truck.REAR - 60 * K;
     return this.cars.every(function (c) {
-      if (c.lane !== lane) return true;
+      if (carLanes(c).indexOf(lane) < 0 && c.lane !== lane) return true;
       var cf = c.x + c.len / 2, cr = c.x - c.len / 2;
       if (cf > tr && cr < tf) return false;
-      if (cf <= tr && c.v > truck.v + 60 && tr - cf < 220) return false;   // fast car right behind
+      if (cf <= tr && c.v > truck.v + 60 * K && tr - cf < 220 * K) return false;   // fast car right behind
       return true;
     });
   };
@@ -138,16 +170,16 @@
     var events = [];
     var lanes = truck.lanesOccupied();
     this.cars.forEach(function (c) {
-      if (lanes.indexOf(c.lane) < 0 || c.exiting) return;
+      if (c.exiting || !carLanes(c).some(function (l) { return lanes.indexOf(l) >= 0; })) return;
       var tf = truck.x + CT.Truck.FRONT, tr = truck.x + CT.Truck.REAR;
       var cf = c.x + c.len / 2, cr = c.x - c.len / 2;
       if (!(tf > cr && tr < cf)) return;
-      if (truck.x < c.x) {                              // hit the car in front
+      if (truck.x < c.x) {
         var rel = truck.v - c.v;
         truck.x = cr - CT.Truck.FRONT - 1;
         if (rel > 0) { c.v += rel * 0.45; truck.v = c.v - rel * 0.25; }
         events.push({ rel: Math.max(0, rel), car: c, front: true });
-      } else {                                          // reversed into a car behind
+      } else {
         var rel2 = c.v - truck.v;
         truck.x = cf - CT.Truck.REAR + 1;
         if (rel2 > 0) { truck.v = c.v + rel2 * 0.2; c.v = Math.max(0, c.v - rel2 * 0.6); }
@@ -159,15 +191,20 @@
 
   // ------------------------------------------------------------- side-view drawing
   Traffic.prototype.drawSide = function (ctx, view, lane, night) {
-    var H = this.world.heightAt, half = view.W / 2 / view.scale + 600;
+    var H = this.world.heightAt, half = view.W / 2 / view.scale + 600, t = view.t;
     this.cars.forEach(function (c) {
-      if (c.lane !== lane || Math.abs(c.x - view.camX) > half) return;
-      var y = H(c.x) + CT.World.LANE_Y[lane];
+      if (Math.round(c.laneT) !== lane || Math.abs(c.x - view.camX) > half) return;
+      var e = c.laneT * c.laneT * (3 - 2 * c.laneT);
+      var y = H(c.x) + D.lerp(CT.World.LANE_Y[0], CT.World.LANE_Y[1], e);
       var slope = Math.atan2(H(c.x + 60) - H(c.x - 60), 120);
       ctx.save(); ctx.globalAlpha = c.alpha;
       ctx.translate(c.x, y); ctx.rotate(slope);
       if (c.exiting) ctx.translate(0, -(1 - c.alpha) * 30);
       drawCarSide(ctx, c, night);
+      if ((c.signal > 0 || Math.abs(c.laneT - c.lane) > 0.02) && Math.floor(t * 4) % 2 === 0) {
+        D.circle(ctx, c.len / 2 - 8, -30, 7, '#ffb020', INK, 2);
+        D.circle(ctx, -c.len / 2 + 6, -30, 7, '#ffb020', INK, 2);
+      }
       ctx.restore();
     });
   };
@@ -276,6 +313,14 @@
       ctx.globalAlpha = 1;
     }
     D.box(ctx, x - w * 0.13, y - w * 0.2, w * 0.26, w * 0.08, w * 0.015, '#f2f2f2', INK, lw * 0.7);
+    if ((c.signal > 0 || Math.abs(c.laneT - c.lane) > 0.02) && Math.floor(Date.now() / 250) % 2 === 0) {
+      var toLeft = (c.signal > 0 ? 1 - c.lane : c.lane) === 1;
+      var bx = toLeft ? x - w * 0.45 : x + w * 0.45;
+      D.circle(ctx, bx, ty - w * 0.03, w * 0.07, '#ffb020', INK, lw * 0.6);
+      var bg = ctx.createRadialGradient(bx, ty, 1, bx, ty, w * 0.25);
+      bg.addColorStop(0, 'rgba(255,176,32,.8)'); bg.addColorStop(1, 'rgba(255,176,32,0)');
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(bx, ty, w * 0.25, 0, Math.PI * 2); ctx.fill();
+    }
     D.box(ctx, x - w * 0.5, y - w * 0.11, w, w * 0.06, w * 0.02, '#2b303b');
   };
 

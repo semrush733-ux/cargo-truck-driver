@@ -535,6 +535,19 @@ svg { fill: currentColor; }
 .hud.cab .banner.hide { transform: translateY(-8px); }
 .modal-win .win-level { margin-top: 4px; }
 .modal-win { padding-top: 40px; }
+.lane-btns { display: flex; gap: 8px; }
+.lane-btns .lane-btn { width: 64px; height: 64px; font-size: 11px; }
+.lane-btns .lane-btn svg { width: 28px; height: 28px; }
+.banner-prog { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.bp-track { flex: 1; min-width: 160px; height: 12px; border-radius: 99px; background: #e8dcc4; overflow: hidden; box-shadow: inset 0 2px 3px rgba(0,0,0,.15); }
+.bp-track i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, #f7901e, #ffc24a); transition: width .25s; }
+.banner-prog b { font-family: var(--font-display); font-weight: 400; font-size: 20px; font-variant-numeric: tabular-nums; color: #1d1d22; min-width: 3.2ch; }
+.easy-tag { background: #35b54a; color: #fff; font-size: 11px; font-weight: 900; letter-spacing: .08em; padding: 3px 7px; border-radius: 8px; }
+@media (max-height: 520px) {
+  .lane-btns .lane-btn { width: 52px; height: 52px; }
+  .lane-btns .lane-btn span { display: none; }
+}
+.lane-btns.hint .lane-btn::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 4px solid #ffe066; animation: ring 1.1s ease-out infinite; pointer-events: none; }
 
 </style>
 </head>
@@ -599,7 +612,7 @@ svg { fill: currentColor; }
   <!-- ============ HUD ============ -->
   <section id="hud" class="screen hud" hidden aria-label="Game controls">
     <div class="hud-top">
-      <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span></div>
+      <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span><span id="easyTag" class="easy-tag" hidden>EASY</span></div>
       <div class="hud-chip cargo-chip" aria-live="polite">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" fill="#d79a5c" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5M12 12v9" fill="none" stroke="#1d1d22" stroke-width="1.6"/></svg>
         <b id="cargoCount">0/3</b>
@@ -623,7 +636,8 @@ svg { fill: currentColor; }
       </button>
     </div>
 
-    <div id="banner" class="banner"><div id="bannerTitle" class="banner-title"></div><div id="bannerSub" class="banner-sub"></div></div>
+    <div id="banner" class="banner"><div id="bannerTitle" class="banner-title"></div><div id="bannerSub" class="banner-sub"></div>
+      <div id="bannerProg" class="banner-prog" hidden><div class="bp-track"><i id="bannerBar"></i></div><b id="bannerTime">0:00</b></div></div>
 
     <div class="controls">
       <div class="ctrl-left">
@@ -649,10 +663,14 @@ svg { fill: currentColor; }
         <div id="actionHint" class="action-hint"></div>
       </div>
       <div class="ctrl-right">
-        <button id="btnLane" class="round-btn lane-btn" data-tap="lane" type="button" aria-label="Change lane">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 2 8h3.5v13h3V8H12zm10 18 5-5h-3.5V3h-3v13H12z"/></svg>
-          <span>LANE</span>
-        </button>
+        <div id="laneBtns" class="lane-btns">
+          <button class="round-btn lane-btn" data-tap="laneLeft" type="button" aria-label="Steer left (left lane)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4 7.5 12l8 8 2-2-6-6 6-6z"/></svg><span>LEFT</span>
+          </button>
+          <button class="round-btn lane-btn" data-tap="laneRight" type="button" aria-label="Steer right (right lane)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 4 6.5 6l6 6-6 6 2 2 8-8z"/></svg><span>RIGHT</span>
+          </button>
+        </div>
         <button class="pedal pedal-gas" data-control="gas" type="button" aria-label="Gas">
           <span class="pedal-grip"></span>
           <span class="pedal-label">GAS</span>
@@ -792,7 +810,8 @@ window.CT = window.CT || {};
     coins: 0,
     upgrades: { engine: 0, tyres: 0, suspension: 0, brakes: 0 },
     paints: ['orange'],
-    paint: 'orange'
+    paint: 'orange',
+    fails: {}
   };
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -809,6 +828,7 @@ window.CT = window.CT || {};
       d.upgrades = Object.assign(d.upgrades, p.upgrades || {});
       d.paints = Array.isArray(p.paints) && p.paints.length ? p.paints : ['orange'];
       d.paint = typeof p.paint === 'string' ? p.paint : 'orange';
+      d.fails = (p.fails && typeof p.fails === 'object') ? p.fails : {};
       return d;
     } catch (e) { return clone(DEFAULTS); }
   }
@@ -845,6 +865,9 @@ window.CT = window.CT || {};
     completedCount: function () {
       var n = 0; for (var k in data.levels) if (data.levels[k].completed) n++; return n;
     },
+    getFails: function (id) { return data.fails[id] || 0; },
+    addFail: function (id) { data.fails[id] = (data.fails[id] || 0) + 1; write(); return data.fails[id]; },
+    clearFails: function (id) { if (data.fails[id]) { delete data.fails[id]; write(); } },
     getCoins: function () { return data.coins; },
     addCoins: function (n) { data.coins = Math.max(0, data.coins + Math.floor(n)); write(); return data.coins; },
     spend: function (n) { if (data.coins < n) return false; data.coins -= n; write(); return true; },
@@ -1198,6 +1221,8 @@ window.CT = window.CT || {};
   D.easeOutBack = function (t) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 
   CT.Draw = D;
+  /** World speed scale: all speeds/accelerations are multiplied by K so on-screen motion matches the km/h shown. */
+  CT.K = 2.5;
 })(window.CT);
 
 </script>
@@ -1216,15 +1241,15 @@ window.CT = window.CT || {};
   var SLOTS = [1010, 620, 230];    // cargo slot centres (art x), loaded front first
 
   var DEFAULTS = {
-    maxSpeed: 360,      // world units / s
-    accel: 300,
-    brake: 760,
-    reverseMax: 150,
-    reverseAccel: 210,
-    rolling: 46,
+    maxSpeed: 360 * CT.K,      // world units / s
+    accel: 300 * CT.K,
+    brake: 760 * CT.K,
+    reverseMax: 150 * CT.K,
+    reverseAccel: 210 * CT.K,
+    rolling: 46 * CT.K,
     drag: 0.12,
     weightFactor: 0.07, // each unit of cargo weight slows acceleration a little
-    gravity: 520
+    gravity: 520 * CT.K
   };
 
   function Truck(cfg) {
@@ -1283,7 +1308,7 @@ window.CT = window.CT || {};
     var grip = c.grip || 1;
     if (wantBrake) decel += c.brake * (0.35 + 0.65 * grip);
     if (this.throttle > 0.01) {
-      if (v < -2) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
+      if (v < -5) decel += c.brake * 0.85 * this.throttle;           // gas while rolling back = brake first
       else a += (c.accel / mass) * (0.55 + 0.45 * grip) * this.throttle * Math.max(0, 1 - Math.pow(Math.max(0, v) / c.maxSpeed, 2));
     }
     if (this.revThrottle > 0.01) {
@@ -1321,7 +1346,7 @@ window.CT = window.CT || {};
     this.accelSm += (acc - this.accelSm) * Math.min(1, dt * 10);
 
     // suspension springs
-    var targetPitch = D.clamp(-this.accelSm * 0.00007, -0.03, 0.03);
+    var targetPitch = D.clamp(-this.accelSm * 0.00007 / CT.K, -0.03, 0.03);
     this.pitchV += ((targetPitch - this.pitch) * 120 - this.pitchV * 10) * dt;
     this.pitch += this.pitchV * dt;
     var sr = Math.min(1, Math.abs(v) / c.maxSpeed);
@@ -1367,7 +1392,7 @@ window.CT = window.CT || {};
   var SLATE = '#3b4250', SLATE_LT = '#545c6c';
   var POSTS = [36, 262, 498, 734, 970];
 
-  function wheel(ctx, cx, cy, ang) {
+  function wheel(ctx, cx, cy, ang, blur) {
     D.circle(ctx, cx, cy, WHEEL_R, '#2b2f38', INK, 6);
     ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
     ctx.fillStyle = '#3a404b';
@@ -1386,6 +1411,16 @@ window.CT = window.CT || {};
     ctx.restore();
     D.circle(ctx, cx, cy, 11, '#2b2f38');
     D.circle(ctx, cx - 4, cy - 4, 4, '#6a707c');
+    if (blur > 0.05) {                       // motion blur on the rim at speed
+      ctx.globalAlpha = Math.min(0.85, blur);
+      var bg = ctx.createRadialGradient(cx, cy, 10, cx, cy, 64);
+      bg.addColorStop(0, '#5a5f69'); bg.addColorStop(0.5, '#c9ccd3'); bg.addColorStop(1, '#9ea3ad');
+      D.circle(ctx, cx, cy, 63, bg);
+      ctx.strokeStyle = 'rgba(70,74,84,.6)'; ctx.lineWidth = 3;
+      [24, 40, 54].forEach(function (r) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); });
+      ctx.globalAlpha = 1;
+      D.circle(ctx, cx, cy, 13, '#2b2f38');
+    }
   }
 
   function bodyBack(ctx, t) {
@@ -1619,7 +1654,8 @@ window.CT = window.CT || {};
 
     // wheels stay on the ground
     var self = this;
-    WHEELS.forEach(function (wx) { wheel(ctx, wx, WHEEL_Y, self.wheelAngle); });
+    var blur = D.clamp((Math.abs(this.v) / (500 * CT.K) - 0.25) * 1.4, 0, 1);
+    WHEELS.forEach(function (wx) { wheel(ctx, wx, WHEEL_Y, self.wheelAngle, blur); });
 
     ctx.save();
     ctx.translate(OX, OY + this.bounce / S); ctx.rotate(this.pitch); ctx.translate(-OX, -OY);
@@ -1644,58 +1680,176 @@ window.CT = window.CT || {};
 
 </script>
 <script>
-/* cargo.js — cargo items, their simple stable physics on the truck bed, counting and artwork. */
+/* cargo.js — cargo items (9 kinds, mixed loads), counting, simple stable bed physics and artwork. */
 (function (CT) {
   'use strict';
   var D = CT.Draw, INK = D.INK;
-  var BOX_W = 320, BOX_H = 250;   // art units (same scale as the truck)
+  var BOX_W = 320, BOX_H = 250;   // art units: every load fits this footprint on the bed
 
-  var STATE = { DOCK: 'dock', CRANE: 'crane', TRUCK: 'truck', STORED: 'stored' };
+  var STATE = { DOCK: 'dock', CARRY: 'carry', TRUCK: 'truck', STORED: 'stored' };
 
-  var PALETTES = [
-    { body: '#d49a5e', side: '#c0844a', light: '#e6b47c', tape: '#c9894c' },
-    { body: '#d8a066', side: '#c28a50', light: '#ebbd88', tape: '#cb8f52' },
-    { body: '#cf9558', side: '#ba7f45', light: '#e1ad74', tape: '#c38647' }
-  ];
+  var TYPES = {
+    box:    { label: 'Boxes',          weight: 1, fragile: false },
+    sacks:  { label: 'Rice sacks',     weight: 2, fragile: false },
+    fruit:  { label: 'Fruit crates',   weight: 1, fragile: true },
+    crate:  { label: 'Wooden crates',  weight: 2, fragile: false },
+    barrel: { label: 'Oil drums',      weight: 2, fragile: false },
+    gas:    { label: 'Gas cylinders',  weight: 2, fragile: true },
+    glass:  { label: 'Glass panels',   weight: 1, fragile: true },
+    fridge: { label: 'Fridges',        weight: 2, fragile: true },
+    steel:  { label: 'Steel beams',    weight: 3, fragile: false }
+  };
 
-  /** Draws one cardboard box, bottom-centre at (cx, by), in art units. */
-  function drawBox(ctx, cx, by, opts) {
-    opts = opts || {};
-    var p = PALETTES[(opts.variant || 0) % PALETTES.length];
+  // ------------------------------------------------------------------ artwork (bottom-centre at cx, by)
+  function outline(ctx, lw) { ctx.strokeStyle = INK; ctx.lineWidth = lw || 6; ctx.stroke(); }
+
+  function artBox(ctx, cx, by, v) {
+    var P = [['#d49a5e', '#c0844a', '#e6b47c', '#c9894c'], ['#d8a066', '#c28a50', '#ebbd88', '#cb8f52'], ['#cf9558', '#ba7f45', '#e1ad74', '#c38647']][v % 3];
     var w = BOX_W, h = BOX_H, x = cx - w / 2, y = by - h;
-    ctx.lineJoin = 'round';
-    D.rr(ctx, x, y, w, h, 6);
-    ctx.fillStyle = p.body; ctx.fill();
-    // shading
+    D.rr(ctx, x, y, w, h, 6); ctx.fillStyle = P[0]; ctx.fill();
     ctx.save(); ctx.clip();
-    ctx.fillStyle = p.side; ctx.fillRect(x + w - 26, y, 26, h);
-    ctx.fillStyle = p.light; ctx.fillRect(x, y, w, 12);
-    ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.fillRect(x, y + h - 16, w, 16);
-    // top flap seam
-    ctx.strokeStyle = 'rgba(120,70,20,.35)'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(x, y + 22); ctx.lineTo(x + w, y + 22); ctx.stroke();
-    // tape with notched end
-    ctx.fillStyle = p.tape;
-    ctx.beginPath();
-    ctx.moveTo(cx - 34, y); ctx.lineTo(cx + 34, y); ctx.lineTo(cx + 34, y + 56);
-    ctx.lineTo(cx + 22, y + 46); ctx.lineTo(cx + 11, y + 56); ctx.lineTo(cx, y + 46);
-    ctx.lineTo(cx - 11, y + 56); ctx.lineTo(cx - 22, y + 46); ctx.lineTo(cx - 34, y + 56);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(90,50,10,.45)'; ctx.lineWidth = 3; ctx.stroke();
-    // printed "this way up" arrows + label
-    if (!opts.plain) {
-      ctx.strokeStyle = 'rgba(70,40,15,.55)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      [x + 34, x + 58].forEach(function (ax) {
-        ctx.beginPath(); ctx.moveTo(ax, y + h - 30); ctx.lineTo(ax, y + h - 74);
-        ctx.moveTo(ax - 9, y + h - 63); ctx.lineTo(ax, y + h - 75); ctx.lineTo(ax + 9, y + h - 63); ctx.stroke();
-      });
-      ctx.fillStyle = 'rgba(255,248,232,.85)'; D.rr(ctx, x + w - 112, y + h - 72, 70, 44, 5); ctx.fill();
-      ctx.fillStyle = 'rgba(70,40,15,.5)';
-      ctx.fillRect(x + w - 104, y + h - 63, 46, 5); ctx.fillRect(x + w - 104, y + h - 52, 34, 5); ctx.fillRect(x + w - 104, y + h - 41, 40, 5);
-    }
+    ctx.fillStyle = P[1]; ctx.fillRect(x + w - 26, y, 26, h);
+    ctx.fillStyle = P[2]; ctx.fillRect(x, y, w, 12);
+    ctx.strokeStyle = 'rgba(120,70,20,.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y + 22); ctx.lineTo(x + w, y + 22); ctx.stroke();
+    ctx.fillStyle = P[3];
+    ctx.beginPath(); ctx.moveTo(cx - 34, y); ctx.lineTo(cx + 34, y); ctx.lineTo(cx + 34, y + 56); ctx.lineTo(cx + 17, y + 46); ctx.lineTo(cx, y + 56); ctx.lineTo(cx - 17, y + 46); ctx.lineTo(cx - 34, y + 56); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(70,40,15,.55)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    [x + 34, x + 58].forEach(function (ax) { ctx.beginPath(); ctx.moveTo(ax, y + h - 30); ctx.lineTo(ax, y + h - 74); ctx.moveTo(ax - 9, y + h - 63); ctx.lineTo(ax, y + h - 75); ctx.lineTo(ax + 9, y + h - 63); ctx.stroke(); });
+    ctx.fillStyle = 'rgba(255,248,232,.85)'; D.rr(ctx, x + w - 112, y + h - 72, 70, 44, 5); ctx.fill();
     ctx.restore();
-    D.rr(ctx, x, y, w, h, 6);
-    ctx.strokeStyle = INK; ctx.lineWidth = 6; ctx.stroke();
+    D.rr(ctx, x, y, w, h, 6); outline(ctx);
+  }
+
+  function artCrate(ctx, cx, by) {
+    var w = BOX_W, h = BOX_H - 10, x = cx - w / 2, y = by - h;
+    D.box(ctx, x, y, w, h, 4, '#c8894a', INK, 6);
+    ctx.save(); D.rr(ctx, x, y, w, h, 4); ctx.clip();
+    ctx.strokeStyle = 'rgba(110,60,20,.45)'; ctx.lineWidth = 4;
+    for (var yy = y + 48; yy < by; yy += 48) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke(); }
+    ctx.restore();
+    ctx.lineWidth = 22; ctx.strokeStyle = '#a8692f';
+    ctx.beginPath(); ctx.moveTo(x + 22, by - 18); ctx.lineTo(x + w - 22, y + 18); ctx.stroke();
+    ctx.lineWidth = 4; ctx.strokeStyle = INK; ctx.stroke();
+    [[x, y, w, 22], [x, by - 22, w, 22], [x, y, 22, h], [x + w - 22, y, 22, h]].forEach(function (r) { D.box(ctx, r[0], r[1], r[2], r[3], 2, '#b5733a', INK, 4); });
+    ctx.fillStyle = '#6b3b12'; [[x + 11, y + 11], [x + w - 11, y + 11], [x + 11, by - 11], [x + w - 11, by - 11]].forEach(function (p) { D.circle(ctx, p[0], p[1], 4, '#5a3412'); });
+    ctx.fillStyle = 'rgba(60,30,10,.55)'; ctx.font = '30px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('CARGO', cx, y + h * 0.3);
+  }
+
+  function artSacks(ctx, cx, by) {
+    var sacks = [[-80, 0, 150, 110], [80, 0, 150, 110], [0, -100, 150, 110], [-75, -186, 130, 70]];
+    sacks.forEach(function (s, i) {
+      if (i === 3) return;
+      var x = cx + s[0], y = by + s[1], w = s[2], h = s[3];
+      ctx.beginPath();
+      ctx.moveTo(x - w / 2 + 10, y); ctx.quadraticCurveTo(x - w / 2 - 6, y - h / 2, x - w / 2 + 12, y - h);
+      ctx.quadraticCurveTo(x, y - h - 14, x + w / 2 - 12, y - h); ctx.quadraticCurveTo(x + w / 2 + 6, y - h / 2, x + w / 2 - 10, y);
+      ctx.quadraticCurveTo(x, y + 8, x - w / 2 + 10, y); ctx.closePath();
+      ctx.fillStyle = i % 2 ? '#ead7ae' : '#e2cc9c'; ctx.fill(); outline(ctx, 5);
+      ctx.strokeStyle = 'rgba(140,100,40,.45)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x - w / 2 + 14, y - h + 10); ctx.quadraticCurveTo(x, y - h + 18, x + w / 2 - 14, y - h + 10); ctx.stroke();
+      ctx.fillStyle = '#2f7d3a'; D.rr(ctx, x - 38, y - h / 2 - 16, 76, 30, 5); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '20px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('RICE', x, y - h / 2 - 1);
+    });
+  }
+
+  function artFruit(ctx, cx, by, v) {
+    var fruitCol = ['#ff8c1a', '#e8322a', '#ffd21f'][v % 3];
+    for (var row = 0; row < 2; row++) {
+      var y = by - row * 118, x = cx - 150;
+      // fruit peeking over each crate
+      for (var f = 0; f < 6; f++) D.circle(ctx, x + 32 + f * 47, y - 98, 24, fruitCol, INK, 3);
+      for (f = 0; f < 6; f++) D.circle(ctx, x + 24 + f * 47 + 2, y - 104, 6, 'rgba(255,255,255,.55)');
+      D.box(ctx, x, y - 92, 300, 92, 4, '#e2b06a', INK, 5);
+      ctx.fillStyle = '#c38d47'; ctx.fillRect(x + 6, y - 60, 288, 10); ctx.fillRect(x + 6, y - 30, 288, 10);
+      D.box(ctx, x + 108, y - 80, 84, 34, 4, '#ffffff', INK, 3);
+      ctx.fillStyle = '#e8322a'; ctx.font = '20px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('FRESH', x + 150, y - 62);
+    }
+  }
+
+  function artBarrel(ctx, cx, by, v) {
+    var cols = [['#2f7fe0', '#1d5cb0'], ['#e23b30', '#a3201a'], ['#2fae4f', '#1f8338']][v % 3];
+    [-78, 78].forEach(function (dx) {
+      var x = cx + dx, w = 140, h = 240, y = by - h;
+      var g = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      g.addColorStop(0, cols[1]); g.addColorStop(0.35, cols[0]); g.addColorStop(0.6, '#ffffff'); g.addColorStop(0.7, cols[0]); g.addColorStop(1, cols[1]);
+      D.box(ctx, x - w / 2, y, w, h, 18, g, INK, 6);
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 6;
+      [y + 60, y + 180].forEach(function (yy) { ctx.beginPath(); ctx.moveTo(x - w / 2 + 3, yy); ctx.lineTo(x + w / 2 - 3, yy); ctx.stroke(); });
+      D.box(ctx, x - 40, y + 92, 80, 50, 6, '#ffd21f', INK, 3);
+      ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(x, y + 98); ctx.lineTo(x + 18, y + 134); ctx.lineTo(x - 18, y + 134); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffd21f'; ctx.fillRect(x - 3, y + 110, 6, 12); ctx.fillRect(x - 3, y + 126, 6, 5);
+    });
+  }
+
+  function artGas(ctx, cx, by) {
+    [-100, 0, 100].forEach(function (dx, i) {
+      var x = cx + dx, w = 86, h = 230 - (i === 1 ? 0 : 10), y = by - h;
+      var g = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      g.addColorStop(0, '#1f7a43'); g.addColorStop(0.4, '#35b54a'); g.addColorStop(0.55, '#a8f0b4'); g.addColorStop(1, '#1f7a43');
+      ctx.beginPath(); ctx.moveTo(x - w / 2, by); ctx.lineTo(x - w / 2, y + 40); ctx.quadraticCurveTo(x - w / 2, y + 6, x, y + 6); ctx.quadraticCurveTo(x + w / 2, y + 6, x + w / 2, y + 40); ctx.lineTo(x + w / 2, by); ctx.closePath();
+      ctx.fillStyle = g; ctx.fill(); outline(ctx, 5);
+      D.box(ctx, x - 14, y - 16, 28, 26, 4, '#9aa3b2', INK, 4);
+      D.box(ctx, x - 26, y + 70, 52, 60, 6, '#ffffff', INK, 3);
+      ctx.fillStyle = '#e23b30'; ctx.font = '18px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('GAS', x, y + 100);
+    });
+  }
+
+  function artGlass(ctx, cx, by) {
+    // A-frame stand with glass sheets
+    ctx.strokeStyle = INK; ctx.lineWidth = 16; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - 140, by - 6); ctx.lineTo(cx - 20, by - 236); ctx.lineTo(cx + 20, by - 236); ctx.lineTo(cx + 140, by - 6); ctx.stroke();
+    ctx.strokeStyle = '#d8352d'; ctx.lineWidth = 10; ctx.stroke();
+    for (var i = 0; i < 3; i++) {
+      var off = i * 14;
+      ctx.beginPath(); ctx.moveTo(cx - 150 + off, by - 8); ctx.lineTo(cx - 40 + off, by - 230); ctx.lineTo(cx + 150 - off, by - 230); ctx.lineTo(cx + 150 - off, by - 8); ctx.closePath();
+      ctx.fillStyle = 'rgba(160,215,245,.45)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(40,90,130,.8)'; ctx.lineWidth = 4; ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(cx - 10, by - 200); ctx.lineTo(cx + 60, by - 60); ctx.moveTo(cx + 40, by - 210); ctx.lineTo(cx + 80, by - 130); ctx.stroke();
+    D.box(ctx, cx - 160, by - 18, 320, 18, 4, '#6b4a2a', INK, 4);
+    D.box(ctx, cx - 72, by - 120, 144, 40, 6, '#ffd21f', INK, 4);
+    ctx.fillStyle = INK; ctx.font = '24px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('FRAGILE', cx, by - 99);
+  }
+
+  function artFridge(ctx, cx, by) {
+    var w = 190, h = BOX_H, x = cx - w / 2, y = by - h;
+    var g = ctx.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, '#dfe6ee'); g.addColorStop(0.3, '#ffffff'); g.addColorStop(1, '#c4cfdb');
+    D.box(ctx, x, y, w, h, 16, g, INK, 6);
+    ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x + 4, y + 88); ctx.lineTo(x + w - 4, y + 88); ctx.stroke();
+    D.box(ctx, x + w - 34, y + 22, 12, 48, 5, '#9aa3b2', INK, 3);
+    D.box(ctx, x + w - 34, y + 108, 12, 70, 5, '#9aa3b2', INK, 3);
+    D.box(ctx, x + 20, y + 120, 60, 36, 4, '#2f7fe0', INK, 3);
+    ctx.fillStyle = '#fff'; ctx.font = '16px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('A++', x + 50, y + 139);
+    // cardboard corner protectors + straps
+    ctx.fillStyle = '#c9894c';
+    [[x - 6, y - 6], [x + w - 30, y - 6], [x - 6, by - 30], [x + w - 30, by - 30]].forEach(function (p) { ctx.fillRect(p[0], p[1], 36, 36); });
+  }
+
+  function artSteel(ctx, cx, by) {
+    var rows = [[0, 3], [1, 3], [2, 2]];
+    rows.forEach(function (r) {
+      for (var k = 0; k < r[1]; k++) {
+        var w = 300 / 3, x = cx - (r[1] * w) / 2 + k * w, y = by - (r[0] + 1) * 74;
+        var g = ctx.createLinearGradient(0, y, 0, y + 70);
+        g.addColorStop(0, '#e8ecf2'); g.addColorStop(0.45, '#9aa3b2'); g.addColorStop(1, '#6b7380');
+        D.box(ctx, x + 3, y, w - 6, 70, 6, g, INK, 5);
+        D.box(ctx, x + 20, y + 22, w - 40, 26, 4, '#5d6676', 'rgba(0,0,0,.5)', 2);
+      }
+    });
+    ctx.strokeStyle = '#d8352d'; ctx.lineWidth = 10;
+    [cx - 70, cx + 70].forEach(function (sx) { ctx.beginPath(); ctx.moveTo(sx, by - 228); ctx.lineTo(sx, by); ctx.stroke(); });
+  }
+
+  var ART = { box: artBox, crate: artCrate, sacks: artSacks, fruit: artFruit, barrel: artBarrel, gas: artGas, glass: artGlass, fridge: artFridge, steel: artSteel };
+
+  function drawCargo(ctx, cx, by, opts) {
+    opts = opts || {};
+    ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+    (ART[opts.type] || artBox)(ctx, cx, by, opts.variant || 0);
   }
 
   function drawStrap(ctx, cx, progress) {
@@ -1705,77 +1859,71 @@ window.CT = window.CT || {};
     ctx.fillStyle = '#1e1e23';
     D.rr(ctx, cx - 15, top, 30, len, 5); ctx.fill();
     ctx.fillStyle = '#3b3b44'; ctx.fillRect(cx - 11, top + 4, 4, Math.max(0, len - 8));
-    // ratchet buckles
     [430, 500].forEach(function (by) {
       if (top + len > by + 22) {
         D.box(ctx, cx - 24, by, 48, 26, 6, '#2c2c33', '#101013', 4);
         D.box(ctx, cx - 14, by + 7, 28, 12, 3, '#6d717b');
       }
     });
-    // anchor hook
     if (progress >= 1) D.box(ctx, cx - 12, 546, 24, 18, 4, '#111114');
   }
 
-  function Cargo(id, def, dock) {
+  // ------------------------------------------------------------------ items + manager
+  function Cargo(id, type, pallet) {
+    var T = TYPES[type] || TYPES.box;
     this.id = id;
-    this.type = def.type || 'box';
-    this.weight = def.weightEach || 1;
+    this.type = type;
+    this.weight = T.weight;
+    this.fragile = T.fragile;
     this.variant = id;
     this.state = STATE.DOCK;
     this.slot = -1;
-    this.x = dock.x; this.y = dock.y;   // world bottom-centre when not on the truck
-    this.dock = dock;
-    this.dx = 0; this.dvx = 0;          // shift along the bed (art units)
+    this.pallet = pallet || { x: 0, y: 0 };
+    this.x = this.pallet.x; this.y = this.pallet.y;   // world bottom-centre when not on the truck
+    this.dx = 0; this.dvx = 0;
+    this.lift = 0;                                     // art-unit raise above the bed floor (drop-in / lift-out)
     this.strap = 0; this.strapTarget = 0;
-    this.rot = 0;
-    this.pop = 0;                        // squash on landing
-    this.alpha = 1;
+    this.rot = 0; this.pop = 0; this.alpha = 1;
   }
 
-  function CargoManager(level) {
+  /** level.cargo: {type, count} or {items: [type, ...]} for a mixed load. */
+  function CargoManager(level, pallets) {
     this.level = level;
-    this.required = level.cargo.count;
-    this.secured = level.cargo.secured !== false;
+    var c = level.cargo;
+    this.types = c.items ? c.items.slice() : [];
+    while (this.types.length < c.count) this.types.push(c.type || 'box');
+    this.required = this.types.length;
+    this.secured = c.secured !== false;
+    this.fragile = this.types.some(function (t) { return (TYPES[t] || {}).fragile; });
     this.items = [];
     this.loaded = new Set();
     this.delivered = new Set();
-    for (var i = 0; i < this.required; i++) {
-      this.items.push(new Cargo(i, level.cargo, level.loadStation.dockSlots[i]));
-    }
+    for (var i = 0; i < this.required; i++) this.items.push(new Cargo(i, this.types[i], pallets ? pallets[i] : null));
   }
 
   CargoManager.STATE = STATE;
+  CargoManager.TYPES = TYPES;
   CargoManager.BOX_W = BOX_W;
   CargoManager.BOX_H = BOX_H;
-  CargoManager.drawBox = drawBox;
-
-  CargoManager.prototype.nextOnDock = function () {
-    for (var i = 0; i < this.items.length; i++) if (this.items[i].state === STATE.DOCK) return this.items[i];
-    return null;
+  CargoManager.drawBox = function (ctx, cx, by, opts) { drawCargo(ctx, cx, by, opts); };
+  CargoManager.label = function (c) {
+    if (c.items) return 'Mixed load';
+    return (TYPES[c.type] || TYPES.box).label;
   };
+
   CargoManager.prototype.nextOnTruck = function () {
-    // unload from the rear slot first (closest to the dock)
     var best = null;
     this.items.forEach(function (it) { if (it.state === STATE.TRUCK && (!best || it.slot > best.slot)) best = it; });
     return best;
   };
-  CargoManager.prototype.freeSlot = function () {
-    var used = {};
-    this.items.forEach(function (it) { if (it.slot >= 0) used[it.slot] = true; });
-    for (var s = 0; s < CT.Truck.SLOTS.length; s++) if (!used[s]) return s;
-    return -1;
-  };
-
-  /** Returns true only the first time an item is counted as loaded. */
-  CargoManager.prototype.placeOnTruck = function (item, slot) {
+  CargoManager.prototype.placeOnTruck = function (item, slot, lift) {
     item.state = STATE.TRUCK; item.slot = slot; item.dx = 0; item.dvx = 0; item.rot = 0;
-    item.strap = 0; item.strapTarget = 1; item.pop = 1;
+    item.lift = lift || 0;
+    item.strap = 0; item.strapTarget = 1; item.pop = lift ? 0 : 1;
     if (this.loaded.has(item.id)) return false;
     this.loaded.add(item.id); return true;
   };
-  CargoManager.prototype.liftFromTruck = function (item) {
-    item.state = STATE.CRANE; item.slot = -1;
-  };
+  CargoManager.prototype.liftFromTruck = function (item) { item.state = STATE.CARRY; item.slot = -1; item.lift = 0; };
   CargoManager.prototype.markDelivered = function (item) {
     item.state = STATE.STORED; item.pop = 1;
     if (this.delivered.has(item.id)) return false;
@@ -1784,22 +1932,20 @@ window.CT = window.CT || {};
 
   CargoManager.prototype.loadedCount = function () { return this.loaded.size; };
   CargoManager.prototype.deliveredCount = function () { return this.delivered.size; };
-  CargoManager.prototype.onTruckCount = function () {
-    return this.items.filter(function (i) { return i.state === STATE.TRUCK; }).length;
-  };
-  CargoManager.prototype.weightOnTruck = function () {
-    return this.items.reduce(function (s, i) { return s + (i.state === STATE.TRUCK ? i.weight : 0); }, 0);
-  };
+  CargoManager.prototype.onTruckCount = function () { return this.items.filter(function (i) { return i.state === STATE.TRUCK; }).length; };
+  CargoManager.prototype.weightOnTruck = function () { return this.items.reduce(function (s, i) { return s + (i.state === STATE.TRUCK ? i.weight : 0); }, 0); };
   CargoManager.prototype.allStrapped = function () {
-    return this.items.every(function (i) { return i.state !== STATE.TRUCK || i.strap >= 1; });
+    return this.items.every(function (i) { return i.state !== STATE.TRUCK || (i.strap >= 1 && Math.abs(i.lift) < 1); });
   };
 
-  /** Cargo physics: strapped boxes spring back to their slot; inertia shifts them a little on hard braking. */
   CargoManager.prototype.update = function (dt, truckAccel) {
+    var K = CT.K || 1;
     var limit = this.secured ? 7 : 40;
-    var inertia = Math.abs(truckAccel) > 420 ? -truckAccel * 0.01 : 0;
+    var a = truckAccel / K;
+    var inertia = Math.abs(a) > 420 ? -a * 0.01 : 0;
     this.items.forEach(function (it) {
-      if (it.strap < it.strapTarget) it.strap = Math.min(it.strapTarget, it.strap + dt * 2.6);
+      if (it.state === STATE.TRUCK && it.lift < 0) it.lift = Math.min(0, it.lift + dt * 900);     // settle into the bed
+      if (it.strap < it.strapTarget && it.lift >= -1) it.strap = Math.min(it.strapTarget, it.strap + dt * 2.6);
       else if (it.strap > it.strapTarget) it.strap = Math.max(it.strapTarget, it.strap - dt * 3.2);
       if (it.pop > 0) it.pop = Math.max(0, it.pop - dt * 3.5);
       if (it.state === STATE.TRUCK) {
@@ -1818,16 +1964,15 @@ window.CT = window.CT || {};
     });
   };
 
-  // ---- drawing on the truck (art space, called from Truck.draw hooks)
   CargoManager.prototype.drawOnTruck = function (ctx) {
     this.items.forEach(function (it) {
       if (it.state !== STATE.TRUCK) return;
       var cx = CT.Truck.SLOTS[it.slot] + it.dx;
       var sq = it.pop > 0 ? Math.sin(it.pop * Math.PI) * 0.06 : 0;
       ctx.save();
-      ctx.translate(cx, CT.Truck.BED_TOP);
+      ctx.translate(cx, CT.Truck.BED_TOP + it.lift);
       ctx.scale(1 + sq, 1 - sq);
-      drawBox(ctx, 0, 0, { variant: it.variant });
+      drawCargo(ctx, 0, 0, { type: it.type, variant: it.variant });
       ctx.restore();
     });
   };
@@ -1838,7 +1983,6 @@ window.CT = window.CT || {};
     });
   };
 
-  // ---- drawing in the world (dock, crane, warehouse)
   CargoManager.prototype.drawWorld = function (ctx, filter) {
     var S = CT.Truck.S;
     this.items.forEach(function (it) {
@@ -1851,7 +1995,7 @@ window.CT = window.CT || {};
       ctx.translate(it.x, it.y);
       ctx.rotate(it.rot);
       ctx.scale(S * (1 + sq), S * (1 - sq));
-      drawBox(ctx, 0, 0, { variant: it.variant });
+      drawCargo(ctx, 0, 0, { type: it.type, variant: it.variant });
       ctx.restore();
     });
   };
@@ -1861,180 +2005,274 @@ window.CT = window.CT || {};
 
 </script>
 <script>
-/* crane.js — gantry crane used at the depot (loading) and the hub (unloading). Runs one pick-and-place job at a time. */
+/* workers.js — teams of two workers carry each load between the pallets (foreground) and the truck bed. */
 (function (CT) {
   'use strict';
   var D = CT.Draw, INK = D.INK;
+  var SKIN = ['#f1c27d', '#c68642', '#e0ac69', '#8d5524', '#f5d0a9', '#a0673c'];
+  var SHIRT = ['#ff8a1f', '#ffc21a', '#ff8a1f', '#7fd34e'];
+  var FEET = 112;            // feet line, on the near kerb in front of the truck
+  var CARRY = -64;           // load bottom relative to feet while carried (shoulder height)
+  var RAIL_ART = 262;        // art y just above the cargo-frame rail
+  var HALF = 56;             // half width of a load in world units
 
-  function Crane(cfg) {
-    this.towerX = cfg.towerX;
-    this.boomLeft = cfg.boomLeft;
-    this.boomRight = cfg.boomRight;
-    this.boomY = cfg.boomY;
-    this.restX = cfg.restX;
-    this.restHook = this.boomY + 90;
-    this.tx = this.restX;
-    this.hookY = this.restHook;
-    this.tv = 0;
-    this.job = null;
-    this.carry = null;
-    this.swing = 0; this.swingV = 0;
-    this.onSound = null;
+  function Crew(game, mode, pallets) {
+    this.g = game;
+    this.mode = mode;            // 'load' | 'unload'
+    this.pallets = pallets;
+    this.teams = [];
+    this.started = false;
+    this.onItem = null;          // callback(item, counted)
+    var rnd = D.rng((game.level ? game.level.id : 1) * 31 + (mode === 'load' ? 1 : 2));
+    for (var i = 0; i < pallets.length; i++) {
+      var p = pallets[i];
+      this.teams.push({
+        idx: i, pallet: p, x: p.x + (mode === 'unload' ? -40 : 0), dir: 1, phase: 'idle', t: 0,
+        delay: i * 0.6, walk: rnd() * 6, item: null, slot: -1,
+        skin: [SKIN[Math.floor(rnd() * SKIN.length)], SKIN[Math.floor(rnd() * SKIN.length)]],
+        shirt: [SHIRT[Math.floor(rnd() * SHIRT.length)], SHIRT[Math.floor(rnd() * SHIRT.length)]],
+        waveT: rnd() * 3
+      });
+    }
   }
+  Crew.FEET = FEET;
 
-  Crane.prototype.busy = function () { return !!this.job; };
+  Crew.prototype.assign = function (items) {
+    var self = this;
+    items.forEach(function (it, i) { if (self.teams[i]) { self.teams[i].item = it; self.teams[i].slot = self.mode === 'load' ? i : it.slot; } });
+  };
 
-  /** from()/to() return {x, y} = world bottom-centre where the box rests. */
-  Crane.prototype.start = function (job) {
-    if (this.job) return false;
-    job.phase = 'toPick';
-    this.job = job;
+  Crew.prototype.start = function () {
+    if (this.started) return false;
+    this.started = true;
+    this.teams.forEach(function (tm) { if (tm.item) { tm.phase = 'wait'; tm.t = 0; } });
     return true;
   };
 
-  Crane.prototype.reset = function () {
-    this.job = null; this.carry = null; this.tx = this.restX; this.hookY = this.restHook; this.swing = this.swingV = 0;
+  Crew.prototype.busy = function () {
+    return this.teams.some(function (tm) { return tm.item && tm.phase !== 'back' && tm.phase !== 'rest' && tm.phase !== 'idle'; });
   };
 
-  function step(cur, target, dt, max, gain) {
-    var d = target - cur;
-    var sp = Math.min(max, Math.abs(d) * gain + 40);
-    var mv = sp * dt;
-    if (Math.abs(d) <= mv) return { v: target, done: true, speed: 0 };
-    return { v: cur + Math.sign(d) * mv, done: false, speed: Math.sign(d) * sp };
+  function walkSpeed(tm, carrying) {
+    if (!carrying) return 230;
+    return 185 / (1 + 0.22 * ((tm.item ? tm.item.weight : 1) - 1));
   }
 
-  Crane.prototype.update = function (dt) {
-    var BOX_H = CT.CargoManager.BOX_H * CT.Truck.S;
-    var j = this.job, r;
-    var prevTx = this.tx;
-    if (!j) {
-      this.tx = step(this.tx, this.restX, dt, 600, 3).v;
-      this.hookY = step(this.hookY, this.restHook, dt, 500, 4).v;
-    } else {
-      var from = j.from(), to = j.to();
-      var liftY = Math.min(from.y, to.y) - BOX_H - 90;   // carry height clears truck and dock
-      switch (j.phase) {
-        case 'toPick':
-          r = step(this.tx, from.x, dt, 2200, 6); this.tx = r.v;
-          var h = step(this.hookY, liftY, dt, 1500, 7); this.hookY = h.v;
-          if (r.done && h.done) j.phase = 'lower';
-          break;
-        case 'lower':
-          r = step(this.hookY, from.y - BOX_H, dt, 1600, 8); this.hookY = r.v;
-          if (r.done) {
-            this.carry = j.item; if (j.onAttach) j.onAttach(j.item);
-            if (this.onSound) this.onSound('hook');
-            j.phase = 'raise';
-          }
-          break;
-        case 'raise':
-          r = step(this.hookY, liftY, dt, 1500, 7); this.hookY = r.v;
-          if (r.done) { j.phase = 'move'; if (this.onSound) this.onSound('whir'); }
-          break;
-        case 'move':
-          r = step(this.tx, to.x, dt, 2000, 5.5); this.tx = r.v;
-          if (r.done) j.phase = 'drop';
-          break;
-        case 'drop':
-          this.tx = to.x;
-          r = step(this.hookY, to.y - BOX_H, dt, 1400, 7); this.hookY = r.v;
-          if (r.done) {
-            var it = this.carry; this.carry = null;
-            if (j.onRelease) j.onRelease(it);
-            j.phase = 'up';
-          }
-          break;
-        case 'up':
-          r = step(this.hookY, liftY, dt, 1800, 9); this.hookY = r.v;
-          if (r.done) { var done = j.onDone; this.job = null; if (done) done(); }
-          break;
+  Crew.prototype.slotWorld = function (tm) {
+    var tr = this.g.truck, ax = CT.Truck.SLOTS[tm.slot];
+    var p = tr.artToWorld(ax, RAIL_ART);
+    return { x: p.x, railY: p.y };
+  };
+
+  /** Seconds until all teams have handed over their load. */
+  Crew.prototype.remaining = function () {
+    var self = this, worst = 0;
+    this.teams.forEach(function (tm) {
+      if (!tm.item) return;
+      var r = 0, sw = tm.slot >= 0 ? self.slotWorld(tm) : { x: tm.x };
+      var dSlot = Math.abs(sw.x - tm.x), dPal = Math.abs(tm.pallet.x - tm.x);
+      var full = Math.abs(sw.x - tm.pallet.x) / walkSpeed(tm, true);
+      if (self.mode === 'load') {
+        switch (tm.phase) {
+          case 'idle': case 'wait': r = Math.max(0, tm.delay - (tm.phase === 'wait' ? tm.t : 0)) + 0.45 + full + 0.75; break;
+          case 'pick': r = 0.45 - tm.t + full + 0.75; break;
+          case 'carry': r = dSlot / walkSpeed(tm, true) + 0.75; break;
+          case 'lift': r = 0.75 - tm.t; break;
+        }
+      } else {
+        switch (tm.phase) {
+          case 'idle': case 'wait': r = Math.max(0, tm.delay - (tm.phase === 'wait' ? tm.t : 0)) + Math.abs(sw.x - tm.x) / walkSpeed(tm, false) + 1.2 + full + 0.4; break;
+          case 'go': r = dSlot / walkSpeed(tm, false) + 1.2 + full + 0.4; break;
+          case 'reach': r = 0.5 - tm.t + 0.7 + full + 0.4; break;
+          case 'take': r = 0.7 - tm.t + full + 0.4; break;
+          case 'carry': r = dPal / walkSpeed(tm, true) + 0.4; break;
+          case 'put': r = 0.4 - tm.t; break;
+        }
       }
-    }
-    // pendulum swing from trolley motion
-    var tvel = dt > 0 ? (this.tx - prevTx) / dt : 0;
-    var acc = dt > 0 ? (tvel - this.tv) / dt : 0;
-    this.tv = tvel;
-    this.swingV += (-this.swing * 40 - this.swingV * 5 - acc * 0.00012) * dt;
-    this.swing = D.clamp(this.swing + this.swingV * dt, -0.12, 0.12);
-    if (this.carry) {
-      this.carry.x = this.tx + Math.sin(this.swing) * (this.hookY - this.boomY) * 0.25;
-      this.carry.y = this.hookY + BOX_H;
-      this.carry.rot = this.swing * 0.5;
-    }
+      worst = Math.max(worst, r);
+    });
+    return worst;
   };
 
-  function lattice(ctx, x, y, w, h, vertical) {
-    ctx.strokeStyle = '#b07d00'; ctx.lineWidth = 3;
-    ctx.beginPath();
-    if (vertical) {
-      for (var yy = y; yy < y + h - 1; yy += w) { ctx.moveTo(x, yy); ctx.lineTo(x + w, Math.min(y + h, yy + w)); ctx.moveTo(x + w, yy); ctx.lineTo(x, Math.min(y + h, yy + w)); }
-    } else {
-      for (var xx = x; xx < x + w - 1; xx += h) { ctx.moveTo(xx, y + h); ctx.lineTo(Math.min(x + w, xx + h / 2), y); ctx.lineTo(Math.min(x + w, xx + h), y + h); }
-    }
-    ctx.stroke();
+  function moveTo(tm, x, speed, dt) {
+    var d = x - tm.x, step = speed * dt;
+    if (Math.abs(d) <= step) { tm.walk += Math.abs(d) / 20; tm.x = x; return true; }
+    tm.dir = d > 0 ? 1 : -1;
+    tm.x += tm.dir * step; tm.walk += step / 20;
+    return false;
   }
 
-  /** Static structure (drawn behind the road layer). */
-  Crane.prototype.drawStructure = function (ctx) {
-    var tx = this.towerX, by = this.boomY, top = by - 70, groundY = -44;
-    ctx.lineJoin = 'round';
-    // mast
-    ctx.fillStyle = 'rgba(0,0,0,.14)'; ctx.fillRect(tx - 18, groundY - 4, 64, 8);
-    ctx.strokeStyle = INK; ctx.lineWidth = 4;
-    ctx.fillStyle = '#ffc21a';
-    ctx.fillRect(tx - 20, top, 6, groundY - top); ctx.strokeRect(tx - 20, top, 6, groundY - top);
-    ctx.fillRect(tx + 14, top, 6, groundY - top); ctx.strokeRect(tx + 14, top, 6, groundY - top);
-    lattice(ctx, tx - 14, by + 34, 28, groundY - by - 34, true);
-    // base footing
-    D.box(ctx, tx - 34, groundY - 14, 68, 18, 4, '#9aa0aa', INK, 3);
-    // A-frame peak + ties
-    ctx.strokeStyle = INK; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(tx, top - 40); ctx.lineTo(this.boomLeft + 10, by); ctx.moveTo(tx, top - 40); ctx.lineTo(this.boomRight - 10, by); ctx.stroke();
-    ctx.fillStyle = '#ffc21a';
-    ctx.beginPath(); ctx.moveTo(tx - 20, by); ctx.lineTo(tx, top - 44); ctx.lineTo(tx + 20, by); ctx.closePath(); ctx.fill();
-    ctx.lineWidth = 4; ctx.stroke();
-    // boom
-    var bw = this.boomRight - this.boomLeft;
-    ctx.fillStyle = '#ffc21a';
-    ctx.fillRect(this.boomLeft, by - 3, bw, 7); ctx.strokeRect(this.boomLeft, by - 3, bw, 7);
-    ctx.fillRect(this.boomLeft, by + 24, bw, 7); ctx.strokeRect(this.boomLeft, by + 24, bw, 7);
-    lattice(ctx, this.boomLeft, by + 4, bw, 20, false);
-    // counterweight
-    D.box(ctx, this.boomLeft - 6, by - 6, 64, 54, 5, '#8c939e', INK, 4);
-    ctx.fillStyle = '#ffc21a';
-    for (var i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(this.boomLeft + i * 16, by + 48); ctx.lineTo(this.boomLeft + i * 16 + 8, by + 48); ctx.lineTo(this.boomLeft + i * 16 + 18, by + 38); ctx.lineTo(this.boomLeft + i * 16 + 10, by + 38); ctx.fill(); }
-    // operator cab
-    D.box(ctx, tx + 18, by + 34, 50, 44, 6, '#ffc21a', INK, 4);
-    D.box(ctx, tx + 34, by + 42, 28, 22, 4, '#8fd0ff', INK, 3);
+  function arc(a, b, u, h) { return { x: D.lerp(a.x, b.x, u), y: D.lerp(a.y, b.y, u) - Math.sin(u * Math.PI) * h }; }
+
+  Crew.prototype.update = function (dt) {
+    var self = this, cargo = this.g.cargo, ST = CT.CargoManager.STATE;
+    var liftArt = RAIL_ART - CT.Truck.BED_TOP;             // negative: raised above the bed floor
+    this.teams.forEach(function (tm) {
+      tm.t += dt; tm.waveT += dt;
+      var it = tm.item;
+      if (!it || !self.started) return;
+      var carryY = FEET + CARRY;
+      if (self.mode === 'load') {
+        switch (tm.phase) {
+          case 'wait': if (tm.t >= tm.delay) { tm.phase = 'pick'; tm.t = 0; it.state = ST.CARRY; } break;
+          case 'pick':
+            var u = Math.min(1, tm.t / 0.45);
+            it.x = tm.x; it.y = D.lerp(tm.pallet.y, carryY, u * u * (3 - 2 * u));
+            if (u >= 1) { tm.phase = 'carry'; tm.t = 0; }
+            break;
+          case 'carry':
+            var sw = self.slotWorld(tm);
+            var arrived = moveTo(tm, sw.x, walkSpeed(tm, true), dt);
+            it.x = tm.x; it.y = carryY + Math.abs(Math.sin(tm.walk * Math.PI)) * -3; it.rot = Math.sin(tm.walk * Math.PI) * 0.02;
+            if (arrived) { tm.phase = 'lift'; tm.t = 0; tm.from = { x: it.x, y: it.y }; }
+            break;
+          case 'lift':
+            var u2 = Math.min(1, tm.t / 0.75), sw2 = self.slotWorld(tm);
+            var e = u2 * u2 * (3 - 2 * u2);
+            var p = arc(tm.from, { x: sw2.x, y: sw2.railY }, e, 40);
+            it.x = p.x; it.y = p.y; it.rot = Math.sin(u2 * Math.PI) * -0.05;
+            if (u2 >= 1) {
+              var counted = cargo.placeOnTruck(it, tm.slot, liftArt);
+              if (self.onItem) self.onItem(it, counted);
+              tm.phase = 'back'; tm.t = 0;
+            }
+            break;
+          case 'back': if (moveTo(tm, tm.pallet.x - 30 + tm.idx * 4, walkSpeed(tm, false), dt)) { tm.phase = 'rest'; tm.dir = 1; tm.waveT = 0; } break;
+        }
+      } else {
+        switch (tm.phase) {
+          case 'wait': if (tm.t >= tm.delay && it.strap <= 0.02) { tm.phase = 'go'; tm.t = 0; } break;
+          case 'go': if (moveTo(tm, self.slotWorld(tm).x, walkSpeed(tm, false), dt)) { tm.phase = 'reach'; tm.t = 0; } break;
+          case 'reach':
+            var r = Math.min(1, tm.t / 0.5);
+            it.lift = liftArt * r * r;
+            if (r >= 1) {
+              var sw3 = self.slotWorld(tm);
+              cargo.liftFromTruck(it);
+              self.g.truck.cargoWeight = cargo.weightOnTruck();
+              tm.from = { x: sw3.x, y: sw3.railY };
+              tm.phase = 'take'; tm.t = 0;
+            }
+            break;
+          case 'take':
+            var u3 = Math.min(1, tm.t / 0.7), e3 = u3 * u3 * (3 - 2 * u3);
+            var p3 = arc(tm.from, { x: tm.x, y: carryY }, e3, 30);
+            it.x = p3.x; it.y = p3.y;
+            if (u3 >= 1) { tm.phase = 'carry'; tm.t = 0; }
+            break;
+          case 'carry':
+            var arrived2 = moveTo(tm, tm.pallet.x, walkSpeed(tm, true), dt);
+            it.x = tm.x; it.y = carryY + Math.abs(Math.sin(tm.walk * Math.PI)) * -3; it.rot = Math.sin(tm.walk * Math.PI) * 0.02;
+            if (arrived2) { tm.phase = 'put'; tm.t = 0; }
+            break;
+          case 'put':
+            var u4 = Math.min(1, tm.t / 0.4);
+            it.x = tm.pallet.x; it.y = D.lerp(carryY, tm.pallet.y, u4); it.rot = 0;
+            if (u4 >= 1) {
+              var c2 = cargo.markDelivered(it);
+              if (self.onItem) self.onItem(it, c2);
+              tm.phase = 'rest'; tm.t = 0; tm.waveT = 0; tm.dir = -1;
+            }
+            break;
+        }
+      }
+    });
   };
 
-  /** Moving parts: trolley, cable, hook (drawn behind the truck so loaded boxes sink into the bed correctly). */
-  Crane.prototype.drawRig = function (ctx) {
-    var by = this.boomY, tx = this.tx;
-    D.box(ctx, tx - 22, by + 26, 44, 18, 4, '#2b2f38', INK, 3);
-    D.circle(ctx, tx - 12, by + 26, 5, '#555', INK, 2);
-    D.circle(ctx, tx + 12, by + 26, 5, '#555', INK, 2);
-    var hx = tx + Math.sin(this.swing) * (this.hookY - by) * 0.25;
-    var hy = this.hookY;
-    ctx.strokeStyle = '#2b2b30'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(tx - 5, by + 44); ctx.lineTo(hx - 5, hy - 26); ctx.moveTo(tx + 5, by + 44); ctx.lineTo(hx + 5, hy - 26); ctx.stroke();
-    // hook block
-    D.box(ctx, hx - 14, hy - 30, 28, 18, 4, '#ffc21a', INK, 3);
-    ctx.save(); D.rr(ctx, hx - 14, hy - 30, 28, 18, 4); ctx.clip();
-    ctx.fillStyle = INK; for (var i = -2; i < 4; i++) { ctx.beginPath(); ctx.moveTo(hx - 14 + i * 10, hy - 12); ctx.lineTo(hx - 8 + i * 10, hy - 30); ctx.lineTo(hx - 3 + i * 10, hy - 30); ctx.lineTo(hx - 9 + i * 10, hy - 12); ctx.fill(); }
-    ctx.restore();
-    if (this.carry) {
-      var halfW = CT.CargoManager.BOX_W * CT.Truck.S * 0.42;
-      ctx.strokeStyle = '#2b2b30'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(hx, hy - 12); ctx.lineTo(hx - halfW, hy + 1); ctx.moveTo(hx, hy - 12); ctx.lineTo(hx + halfW, hy + 1); ctx.stroke();
-    } else {
-      ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(hx, hy - 12); ctx.lineTo(hx, hy - 4); ctx.arc(hx - 5, hy - 4, 5, 0, Math.PI * 0.9); ctx.stroke();
+  // ------------------------------------------------------------ drawing
+  function pallet(ctx, x, y) {
+    D.box(ctx, x - 60, y, 120, 12, 2, '#b8783e', INK, 2.5);
+    ctx.fillStyle = '#8a5528';
+    ctx.fillRect(x - 54, y + 4, 16, 6); ctx.fillRect(x - 8, y + 4, 16, 6); ctx.fillRect(x + 38, y + 4, 16, 6);
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(x, y + 14, 66, 5, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /**
+   * One worker, feet at (x, y). pose: 'walk' | 'carry' | 'lift' | 'idle' | 'wave'.
+   * hand: point the hands reach for (world), used by carry/lift.
+   */
+  function worker(ctx, x, y, dir, walk, pose, skin, shirt, hand, t) {
+    var moving = pose === 'walk' || pose === 'carry';
+    var sw = moving ? Math.sin(walk * Math.PI) : 0;
+    ctx.save(); ctx.translate(x, y);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(0, 2, 20, 5, 0, 0, Math.PI * 2); ctx.fill();
+    var hipY = -50, legL = 48;
+    var bend = pose === 'lift' ? 0.18 : 0;
+    // legs
+    [[sw * 0.5, '#24497f'], [-sw * 0.5, '#2f5d9e']].forEach(function (L, i) {
+      var a = L[0] + (i ? bend : -bend);
+      var fx = Math.sin(a) * legL * dir, fy = hipY + Math.cos(a) * legL;
+      ctx.strokeStyle = INK; ctx.lineWidth = 15; ctx.beginPath(); ctx.moveTo(i ? 3 : -3, hipY); ctx.lineTo(fx, fy); ctx.stroke();
+      ctx.strokeStyle = L[1]; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(i ? 3 : -3, hipY); ctx.lineTo(fx, fy); ctx.stroke();
+      D.box(ctx, fx - 6 + dir * 3, fy - 5, 15, 9, 3, '#3a2a1e', INK, 2);
+    });
+    // torso (hi-vis vest)
+    var bob = moving ? -Math.abs(sw) * 2 : 0;
+    ctx.translate(0, bob);
+    D.box(ctx, -15, -94, 30, 48, 10, shirt, INK, 3);
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(-14, -74, 28, 5); ctx.fillRect(-14, -62, 28, 5);
+    ctx.fillStyle = '#2f5d9e'; ctx.fillRect(-14, -52, 28, 6);
+    // head + hard hat
+    D.circle(ctx, dir * 2, -108, 14, skin, INK, 3);
+    ctx.fillStyle = '#ffd21f'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(dir * 2, -112, 15, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(dir * 2 - 13 * dir, -112); ctx.lineTo(dir * 2 + 22 * dir, -112); ctx.stroke();
+    D.circle(ctx, dir * 9, -106, 2.4, INK);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(dir * 7, -101, 4, 0.2, Math.PI - 0.2); ctx.stroke();
+    // arms
+    var sh = { x: 0, y: -86 };
+    function arm(tx, ty, col) {
+      ctx.strokeStyle = INK; ctx.lineWidth = 11; ctx.beginPath(); ctx.moveTo(sh.x, sh.y); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(sh.x, sh.y); ctx.lineTo(tx, ty); ctx.stroke();
+      D.circle(ctx, tx, ty, 5.5, skin, INK, 2);
     }
+    if ((pose === 'carry' || pose === 'lift') && hand) {
+      arm(hand.x - x, hand.y - y - bob, shirt);
+    } else if (pose === 'wave') {
+      var wv = Math.sin(t * 10) * 10;
+      arm(dir * 14 + wv, -130, shirt);
+      arm(-dir * 8, -56, shirt);
+    } else {
+      arm(sw * 16 * dir, -52, shirt);
+      arm(-sw * 16 * dir, -54, shirt);
+    }
+    ctx.restore();
+  }
+  Crew.drawWorker = worker;
+
+  Crew.prototype.drawPallets = function (ctx) {
+    this.pallets.forEach(function (p) { pallet(ctx, p.x, p.y); });
   };
 
-  CT.Crane = Crane;
+  Crew.prototype.draw = function (ctx, t) {
+    var self = this, ST = CT.CargoManager.STATE, S = CT.Truck.S;
+    this.teams.forEach(function (tm) {
+      var it = tm.item;
+      var holding = it && it.state === ST.CARRY && (tm.phase === 'pick' || tm.phase === 'carry' || tm.phase === 'lift' || tm.phase === 'take' || tm.phase === 'put');
+      var pose = holding ? (tm.phase === 'lift' || tm.phase === 'take' ? 'lift' : 'carry')
+        : (tm.phase === 'go' || tm.phase === 'back') ? 'walk'
+        : (tm.phase === 'reach') ? 'lift'
+        : (tm.phase === 'rest' && tm.waveT < 2.2) || (tm.phase === 'idle' && Math.sin(tm.waveT * 0.7) > 0.85) ? 'wave' : 'idle';
+      var spread = holding ? HALF + 16 : 34;
+      var cx = holding ? it.x : tm.x;
+      var front = { x: cx + spread * tm.dir, y: FEET }, back = { x: cx - spread * tm.dir, y: FEET };
+      if (tm.phase === 'lift' || tm.phase === 'take' || tm.phase === 'reach') { front.x = tm.x + spread * tm.dir; back.x = tm.x - spread * tm.dir; }
+      var hy = holding ? it.y - 40 : FEET - 150;
+      var hb = { x: (holding ? it.x : tm.x) - HALF * tm.dir, y: hy }, hf = { x: (holding ? it.x : tm.x) + HALF * tm.dir, y: hy };
+      if (tm.phase === 'reach') { var s = self.slotWorld(tm); hb = { x: s.x - HALF, y: s.railY - 30 }; hf = { x: s.x + HALF, y: s.railY - 30 }; }
+      var reachable = function (h, w) { var dy = Math.max(h.y, w.y - 150); return { x: D.clamp(h.x, w.x - 46, w.x + 46), y: dy }; };
+      worker(ctx, back.x, back.y, tm.dir, tm.walk + 0.5, pose, tm.skin[0], tm.shirt[0], reachable(hb, back), t + tm.idx);
+      if (holding) {
+        ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.rot); ctx.scale(S, S);
+        CT.CargoManager.drawBox(ctx, 0, 0, { type: it.type, variant: it.variant });
+        ctx.restore();
+      }
+      worker(ctx, front.x, front.y, tm.dir, tm.walk, pose, tm.skin[1], tm.shirt[1], reachable(hf, front), t + tm.idx + 0.4);
+    });
+  };
+
+  CT.Crew = Crew;
 })(window.CT);
 
 </script>
@@ -2563,9 +2801,15 @@ window.CT = window.CT || {};
     ctx.fillStyle = INK; for (var x = x1 - 20; x < x1 + dk.w; x += 26) { ctx.beginPath(); ctx.moveTo(x, top + 16); ctx.lineTo(x + 12, top); ctx.lineTo(x + 24, top); ctx.lineTo(x + 12, top + 16); ctx.fill(); }
     ctx.restore();
     [x1 + 30, x1 + dk.w - 50].forEach(function (bx) { D.box(ctx, bx, top + 22, 20, 30, 4, '#1d1d22'); });
-    st.dockSlots.forEach(function (s) {
+    st.dockSlots.forEach(function (s, i) {
       D.box(ctx, s.x - 56, s.y, 112, 10, 2, '#b8783e', INK, 3);
       ctx.fillStyle = '#8a5528'; ctx.fillRect(s.x - 50, s.y + 3, 14, 5); ctx.fillRect(s.x - 7, s.y + 3, 14, 5); ctx.fillRect(s.x + 36, s.y + 3, 14, 5);
+      // stock waiting in the warehouse
+      var cols = ['#d49a5e', '#c8894a', '#d8a066'];
+      for (var r = 0; r < 2 - (i % 2); r++) {
+        D.box(ctx, s.x - 48 + r * 8, s.y - 40 - r * 40, 96 - r * 16, 40, 3, cols[(i + r) % 3], INK, 3);
+        ctx.fillStyle = 'rgba(120,70,20,.35)'; ctx.fillRect(s.x - 6 + r * 0, s.y - 40 - r * 40, 12, 40);
+      }
     });
   }
 
@@ -2805,68 +3049,101 @@ window.CT = window.CT || {};
   Traffic.prototype.makeCar = function (x, lane, v) {
     var t = this.pickType(), c = this.cfg;
     var vMax = c.speedMin + this.rnd() * (c.speedMax - c.speedMin);
-    if (lane === 1) vMax += 40;                 // left lane is a bit faster
+    if (lane === 1) vMax += 40 * CT.K;          // left lane is a bit faster
     if (t.id === 'bus') vMax *= 0.8;
     return { id: this.nextId++, type: t, x: x, lane: lane, v: v == null ? vMax * 0.8 : v, vMax: vMax, len: t.len,
-      color: COLORS[Math.floor(this.rnd() * COLORS.length)], wheel: 0, braking: false, alpha: 1, exiting: false };
+      color: COLORS[Math.floor(this.rnd() * COLORS.length)], wheel: 0, braking: false, alpha: 1, exiting: false,
+      laneT: lane, laneCd: 2 + this.rnd() * 4, signal: 0 };
   };
 
-  Traffic.prototype.spaceFree = function (x, lane, len, truck) {
-    var ok = this.cars.every(function (c) { return c.lane !== lane || Math.abs(c.x - x) > (c.len + len) / 2 + 220; });
+  Traffic.prototype.spaceFree = function (x, lane, len, truck, gapAhead, gapBehind) {
+    var K = CT.K, ga = gapAhead || 220, gb = gapBehind || 220;
+    var ok = this.cars.every(function (c) {
+      if (Math.round(c.laneT) !== lane && c.lane !== lane) return true;
+      return c.x > x ? (c.x - c.len / 2) - (x + len / 2) > ga : (x - len / 2) - (c.x + c.len / 2) > gb;
+    });
     if (ok && truck) {
-      var tl = truck.laneIndex();
-      if (tl === lane || tl === -1) ok = x - len / 2 > truck.x + CT.Truck.FRONT + 250 || x + len / 2 < truck.x + CT.Truck.REAR - 250;
+      var lanes = truck.lanesOccupied();
+      if (lanes.indexOf(lane) >= 0) ok = x - len / 2 > truck.x + CT.Truck.FRONT + 250 * K || x + len / 2 < truck.x + CT.Truck.REAR - 250 * K;
     }
     return ok;
   };
 
   Traffic.prototype.init = function (truck) {
     if (!this.cfg) return;
-    var n = this.cfg.density;
+    var K = CT.K, n = this.density();
     for (var i = 0; i < n * 3 && this.cars.length < n; i++) {
-      var x = truck.x + 1600 + this.rnd() * 4200;
+      var x = truck.x + 1600 * K + this.rnd() * 4200 * K;
       var lane = this.rnd() < 0.5 ? 0 : 1;
       if (x < this.cfg.exitX - 300 && this.spaceFree(x, lane, 260, truck)) this.cars.push(this.makeCar(x, lane));
     }
   };
 
+  /** Cars kept around the truck (lower when the player gets easy-mode help). */
+  Traffic.prototype.density = function () { return Math.max(1, Math.round(this.cfg.density * (this.densityMult || 1))); };
+
   Traffic.prototype.front = function (c) { return c.x + c.len / 2; };
   Traffic.prototype.rear = function (c) { return c.x - c.len / 2; };
+  /** Lanes a car is touching (both while it changes lane). */
+  function carLanes(c) { return c.laneT > 0.2 && c.laneT < 0.8 ? [0, 1] : [Math.round(c.laneT)]; }
+  Traffic.carLanes = carLanes;
 
   Traffic.prototype.update = function (dt, truck, t) {
     if (!this.cfg) return;
-    var self = this, cars = this.cars, exitX = this.cfg.exitX;
-    var tLane = truck.laneIndex();
+    var self = this, cars = this.cars, exitX = this.cfg.exitX, K = CT.K;
+    var tLanes = truck.lanesOccupied();
     var tFront = truck.x + CT.Truck.FRONT, tRear = truck.x + CT.Truck.REAR;
+    var weave = (this.cfg.weave || 0.3) * (this.densityMult || 1);
 
     cars.forEach(function (c) {
       var target = c.vMax, cf = c.x + c.len / 2;
-      // leader in the same lane (car or truck)
+      var myLanes = carLanes(c);
+      if (myLanes.indexOf(c.lane) < 0) myLanes.push(c.lane);
+      // leader in my lane(s): car or truck
       var gap = Infinity, leadV = 0;
       cars.forEach(function (o) {
-        if (o === c || o.lane !== c.lane || o.x <= c.x) return;
+        if (o === c || o.x <= c.x) return;
+        var ol = carLanes(o);
+        if (!ol.some(function (l) { return myLanes.indexOf(l) >= 0; })) return;
         var g = o.x - o.len / 2 - cf;
         if (g < gap) { gap = g; leadV = o.v; }
       });
-      if ((tLane === c.lane || tLane === -1) && tRear > c.x) {
+      if (tLanes.some(function (l) { return myLanes.indexOf(l) >= 0; }) && tRear > c.x) {
         var g2 = tRear - cf;
         if (g2 < gap) { gap = g2; leadV = Math.max(0, truck.v); }
       }
-      var safe = 80 + c.v * 0.85;
-      if (gap < safe) target = Math.min(target, Math.max(0, leadV * D.clamp((gap - 40) / safe, 0, 1)));
-      if (gap < 40) target = 0;
+      var safe = 80 * K + c.v * 0.7;
+      if (gap < safe) target = Math.min(target, Math.max(0, leadV * D.clamp((gap - 40 * K) / safe, 0, 1)));
+      if (gap < 40 * K) target = 0;
       // traffic lights
       self.lights.forEach(function (l) {
         var stop = l.x - 60, dist = stop - cf;
-        if (dist < -10 || dist > 600) return;
+        if (dist < -10 || dist > 1500 * K) return;
         var s = lightState(l, t);
         if (s === 'green') return;
-        var stopDist = c.v * c.v / (2 * 600);
-        if (s === 'yellow' && stopDist > dist - 5) return;     // too close to stop: go through
-        target = Math.min(target, Math.max(0, (dist - 10) * 1.6));
+        var stopDist = c.v * c.v / (2 * 600 * K);
+        if (s === 'yellow' && stopDist > dist - 5) return;
+        target = Math.min(target, Math.sqrt(2 * 520 * K * Math.max(0, dist - 10)));
       });
-      if (c.v < target) c.v = Math.min(target, c.v + 230 * dt);
-      else c.v = Math.max(target, c.v - 720 * dt);
+      // lane changes: overtake a slow leader, or weave now and then
+      c.laneCd -= dt;
+      if (c.signal > 0) {
+        c.signal -= dt;
+        if (c.signal <= 0) {
+          var other = 1 - c.lane;
+          if (self.spaceFree(c.x, other, c.len, truck, 160 * K, 220 * K)) c.lane = other;
+          c.laneCd = 3 + self.rnd() * 5;
+        }
+      } else if (c.laneCd <= 0 && Math.abs(c.laneT - c.lane) < 0.01 && !c.exiting && c.type.id !== 'bus') {
+        var blocked = gap < safe * 1.6 && leadV < c.vMax - 30 * K;
+        if ((blocked && self.rnd() < 0.6) || self.rnd() < weave * 0.25) {
+          if (self.spaceFree(c.x, 1 - c.lane, c.len, truck, 160 * K, 220 * K)) c.signal = 0.9;
+        }
+        c.laneCd = 1.2 + self.rnd() * 2;
+      }
+      c.laneT = D.approach(c.laneT, c.lane, dt * 1.1);
+      if (c.v < target) c.v = Math.min(target, c.v + 230 * K * dt);
+      else c.v = Math.max(target, c.v - 720 * K * dt);
       c.braking = target < c.v - 5 || (c.v < 5 && target < 5);
       c.x += c.v * dt;
       c.wheel += c.v * dt / 22;
@@ -2874,13 +3151,12 @@ window.CT = window.CT || {};
       if (c.exiting) c.alpha = Math.max(0, c.alpha - dt * 1.5);
     });
 
-    // recycle cars far behind / exited, keep density around the truck
     for (var i = cars.length - 1; i >= 0; i--) {
-      if (cars[i].alpha <= 0 || cars[i].x < truck.x - 3000) cars.splice(i, 1);
+      if (cars[i].alpha <= 0 || cars[i].x < truck.x - 3000 * K) cars.splice(i, 1);
     }
-    var need = this.cfg.density - cars.length;
+    var need = this.density() - cars.length;
     for (var k = 0; k < need && k < 2; k++) {
-      var x = truck.x + 2600 + this.rnd() * 1800;
+      var x = truck.x + 2600 * K + this.rnd() * 1800 * K;
       var lane = this.rnd() < 0.5 ? 0 : 1;
       if (x < exitX - 300 && this.spaceFree(x, lane, 260, truck)) cars.push(this.makeCar(x, lane));
     }
@@ -2888,12 +3164,12 @@ window.CT = window.CT || {};
 
   /** Can the truck move into `lane` right now? */
   Traffic.prototype.laneFree = function (truck, lane) {
-    var tf = truck.x + CT.Truck.FRONT + 60, tr = truck.x + CT.Truck.REAR - 60;
+    var K = CT.K, tf = truck.x + CT.Truck.FRONT + 60 * K, tr = truck.x + CT.Truck.REAR - 60 * K;
     return this.cars.every(function (c) {
-      if (c.lane !== lane) return true;
+      if (carLanes(c).indexOf(lane) < 0 && c.lane !== lane) return true;
       var cf = c.x + c.len / 2, cr = c.x - c.len / 2;
       if (cf > tr && cr < tf) return false;
-      if (cf <= tr && c.v > truck.v + 60 && tr - cf < 220) return false;   // fast car right behind
+      if (cf <= tr && c.v > truck.v + 60 * K && tr - cf < 220 * K) return false;   // fast car right behind
       return true;
     });
   };
@@ -2903,16 +3179,16 @@ window.CT = window.CT || {};
     var events = [];
     var lanes = truck.lanesOccupied();
     this.cars.forEach(function (c) {
-      if (lanes.indexOf(c.lane) < 0 || c.exiting) return;
+      if (c.exiting || !carLanes(c).some(function (l) { return lanes.indexOf(l) >= 0; })) return;
       var tf = truck.x + CT.Truck.FRONT, tr = truck.x + CT.Truck.REAR;
       var cf = c.x + c.len / 2, cr = c.x - c.len / 2;
       if (!(tf > cr && tr < cf)) return;
-      if (truck.x < c.x) {                              // hit the car in front
+      if (truck.x < c.x) {
         var rel = truck.v - c.v;
         truck.x = cr - CT.Truck.FRONT - 1;
         if (rel > 0) { c.v += rel * 0.45; truck.v = c.v - rel * 0.25; }
         events.push({ rel: Math.max(0, rel), car: c, front: true });
-      } else {                                          // reversed into a car behind
+      } else {
         var rel2 = c.v - truck.v;
         truck.x = cf - CT.Truck.REAR + 1;
         if (rel2 > 0) { truck.v = c.v + rel2 * 0.2; c.v = Math.max(0, c.v - rel2 * 0.6); }
@@ -2924,15 +3200,20 @@ window.CT = window.CT || {};
 
   // ------------------------------------------------------------- side-view drawing
   Traffic.prototype.drawSide = function (ctx, view, lane, night) {
-    var H = this.world.heightAt, half = view.W / 2 / view.scale + 600;
+    var H = this.world.heightAt, half = view.W / 2 / view.scale + 600, t = view.t;
     this.cars.forEach(function (c) {
-      if (c.lane !== lane || Math.abs(c.x - view.camX) > half) return;
-      var y = H(c.x) + CT.World.LANE_Y[lane];
+      if (Math.round(c.laneT) !== lane || Math.abs(c.x - view.camX) > half) return;
+      var e = c.laneT * c.laneT * (3 - 2 * c.laneT);
+      var y = H(c.x) + D.lerp(CT.World.LANE_Y[0], CT.World.LANE_Y[1], e);
       var slope = Math.atan2(H(c.x + 60) - H(c.x - 60), 120);
       ctx.save(); ctx.globalAlpha = c.alpha;
       ctx.translate(c.x, y); ctx.rotate(slope);
       if (c.exiting) ctx.translate(0, -(1 - c.alpha) * 30);
       drawCarSide(ctx, c, night);
+      if ((c.signal > 0 || Math.abs(c.laneT - c.lane) > 0.02) && Math.floor(t * 4) % 2 === 0) {
+        D.circle(ctx, c.len / 2 - 8, -30, 7, '#ffb020', INK, 2);
+        D.circle(ctx, -c.len / 2 + 6, -30, 7, '#ffb020', INK, 2);
+      }
       ctx.restore();
     });
   };
@@ -3041,6 +3322,14 @@ window.CT = window.CT || {};
       ctx.globalAlpha = 1;
     }
     D.box(ctx, x - w * 0.13, y - w * 0.2, w * 0.26, w * 0.08, w * 0.015, '#f2f2f2', INK, lw * 0.7);
+    if ((c.signal > 0 || Math.abs(c.laneT - c.lane) > 0.02) && Math.floor(Date.now() / 250) % 2 === 0) {
+      var toLeft = (c.signal > 0 ? 1 - c.lane : c.lane) === 1;
+      var bx = toLeft ? x - w * 0.45 : x + w * 0.45;
+      D.circle(ctx, bx, ty - w * 0.03, w * 0.07, '#ffb020', INK, lw * 0.6);
+      var bg = ctx.createRadialGradient(bx, ty, 1, bx, ty, w * 0.25);
+      bg.addColorStop(0, 'rgba(255,176,32,.8)'); bg.addColorStop(1, 'rgba(255,176,32,0)');
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(bx, ty, w * 0.25, 0, Math.PI * 2); ctx.fill();
+    }
     D.box(ctx, x - w * 0.5, y - w * 0.11, w, w * 0.06, w * 0.02, '#2b303b');
   };
 
@@ -3054,7 +3343,7 @@ window.CT = window.CT || {};
 (function (CT) {
   'use strict';
   var D = CT.Draw, INK = D.INK;
-  var SEG = 60, N = 96;                 // 96 segments x 60 units ahead
+  var SEG = 90, N = 110;                // 110 segments x 90 units ahead
   var ROAD_HALF = 205, LANE = 75;       // lane centres at +75 (right/near) and -75 (left/far)
   var BUNNY = '#fbfaf7';
 
@@ -3068,8 +3357,8 @@ window.CT = window.CT || {};
     for (var i = 0; i < cs.length; i++) {
       var c = cs[i];
       if (z >= c.x1 && z <= c.x2) {
-        var f = Math.min(1, (z - c.x1) / 260, (c.x2 - z) / 260);
-        return c.dir * c.sharp * 0.00042 * f;
+        var f = Math.min(1, (z - c.x1) / 600, (c.x2 - z) / 600);
+        return c.dir * c.sharp * 0.00024 * f;
       }
     }
     return 0;
@@ -3084,7 +3373,8 @@ window.CT = window.CT || {};
     var elev = function (x) { return -world.heightAt(x); };
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
     var cab = mode === 'cab';
-    var F = Math.min(W, Hh * 1.8) * (cab ? 0.78 : 0.95);
+    var sr = D.clamp(Math.abs(CT.Garage.kmh(tr.v)) / 300, 0, 1);       // 0 … 1 at 300 km/h
+    var F = Math.min(W, Hh * 1.8) * (cab ? 0.78 : 0.95) * (1 - 0.24 * sr);   // wider view at speed
     var tl = truckLat(tr);
     var camZ = cab ? tr.x + CT.Truck.FRONT - 50 : tr.x + CT.Truck.REAR - 620;
     var camLat = cab ? tl - 24 : tl * 0.7;
@@ -3092,6 +3382,7 @@ window.CT = window.CT || {};
     var hz = Hh * (cab ? 0.47 : 0.36);
     // look slightly up/down with the slope ahead so hills read well
     hz += D.clamp((elev(camZ + 700) - elev(camZ)) / 700 * F * 0.55, -Hh * 0.08, Hh * 0.08);
+    if (sr > 0.3) hz += (Math.random() - 0.5) * (sr - 0.3) * (sr - 0.3) * 9;   // road rumble at high speed
 
     // ---- segment table
     var pts = this.pts, zBase = Math.floor((camZ + 8) / SEG) * SEG, xo = 0, dx = 0;
@@ -3124,7 +3415,7 @@ window.CT = window.CT || {};
     });
     if (g.traffic) g.traffic.cars.forEach(function (c) {
       var z = c.x - c.len / 2;
-      if (z > zMin && z < zMax) sprites.push({ z: z, lat: c.lane === 0 ? LANE : -LANE, k: 'car', c: c });
+      if (z > zMin && z < zMax) { var e = c.laneT * c.laneT * (3 - 2 * c.laneT); sprites.push({ z: z, lat: mix(LANE, -LANE, e), k: 'car', c: c }); }
     });
     if (!cab) sprites.push({ z: tr.x + CT.Truck.REAR, lat: tl, k: 'truck' });
     sprites.sort(function (a, b) { return b.z - a.z; });
@@ -3161,6 +3452,14 @@ window.CT = window.CT || {};
             for (var bl = -ROAD_HALF; bl < ROAD_HALF; bl += 60) this.quadZ(ctx, o.x - 20, o.x + 20, a, b, bl, bl + 30, INK);
           }
         }, this);
+        // reflector posts (strong motion cue at speed)
+        if (Math.floor(a.z / SEG) % 3 === 0) {
+          [-1, 1].forEach(function (sd) {
+            var px = a.sx + sd * ROAD_HALF * 1.3 * a.s, pw = Math.max(1.5, 7 * a.s), ph = 46 * a.s;
+            ctx.fillStyle = '#f4f4f4'; ctx.fillRect(px - pw / 2, a.sy - ph, pw, ph);
+            ctx.fillStyle = sd < 0 ? '#ff4b3e' : '#ffb020'; ctx.fillRect(px - pw / 2, a.sy - ph, pw, ph * 0.22);
+          });
+        }
         // warehouses as walls on the left
         stations.forEach(function (st) {
           var bd = st.building;
@@ -3176,6 +3475,7 @@ window.CT = window.CT || {};
     while (si < sprites.length) { this.sprite(ctx, sprites[si], pts, camZ, camLat, camY, F, hz, W, g, night, 0); si++; }
 
     if (night) this.headlights(ctx, pts, tl, camLat, cab);
+    if (sr > 0.35) this.speedLines(ctx, W, Hh, hz, sr, g.t);
     world.drawWeather(ctx, v);
     if (cab) this.cabInterior(ctx, v, g, tl);
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
@@ -3504,6 +3804,22 @@ window.CT = window.CT || {};
   }
   View3D.drawBunnyFace = drawBunnyFace;
 
+  /** Streaks rushing out from the vanishing point. */
+  View3D.prototype.speedLines = function (ctx, W, H, hz, sr, t) {
+    var k = (sr - 0.35) / 0.65, n = Math.round(10 + 34 * k), cx = W / 2, maxR = Math.hypot(W, H) * 0.65;
+    ctx.save(); ctx.lineCap = 'round';
+    for (var i = 0; i < n; i++) {
+      var a = hash(i * 7.13) * Math.PI * 2;
+      if (Math.sin(a) < -0.55) continue;                    // keep the sky mostly clear
+      var ph = (t * (1.4 + 2.6 * k) + hash(i * 3.7)) % 1;
+      var r1 = maxR * (0.25 + ph * 0.75), r2 = r1 + maxR * (0.06 + 0.16 * k);
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.12 + 0.28 * k) * ph + ')';
+      ctx.lineWidth = 1 + 2.5 * ph;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r1, hz + Math.sin(a) * r1 * 0.75); ctx.lineTo(cx + Math.cos(a) * r2, hz + Math.sin(a) * r2 * 0.75); ctx.stroke();
+    }
+    ctx.restore();
+  };
+
   View3D.prototype.headlights = function (ctx, pts, tl, camLat, cab) {
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     var a = null, b = null;
@@ -3771,7 +4087,7 @@ window.CT = window.CT || {};
  *
  * Level config fields:
  *   id, name, chapter, theme ('country' | 'city' | 'desert' | 'snow' | 'night'), implemented, tutorial
- *   cargo:       { type, count, weightEach, fragile }
+ *   cargo:       { type, count } or { items: [type, type, type], count } (mixed load); kinds in cargo.js
  *   truck:       { maxSpeedCap }                      optional cap (tutorial)
  *   start:       { x }
  *   road:        { start, end, terrain: [{x,y}], curves: [{x1,x2,dir,sharp,limit}] }   y<0 is uphill
@@ -3795,13 +4111,9 @@ window.CT = window.CT || {};
     { theme: 'snow',    name: 'Frozen Pass' },
     { theme: 'night',   name: 'Night Express' }
   ];
-  var CARGO = [
-    { type: 'box',    label: 'Boxes',          weightEach: 1, fragile: false },
-    { type: 'crate',  label: 'Wooden crates',  weightEach: 2, fragile: false },
-    { type: 'barrel', label: 'Oil barrels',    weightEach: 2, fragile: false },
-    { type: 'glass',  label: 'Fragile glass',  weightEach: 1, fragile: true },
-    { type: 'steel',  label: 'Steel blocks',   weightEach: 3, fragile: false }
-  ];
+  // single-type loads cycle through these; every 3rd level is a mixed load
+  var CARGO = ['box', 'sacks', 'fruit', 'crate', 'barrel', 'gas', 'glass', 'fridge', 'steel'];
+  var MIX = ['box', 'sacks', 'fruit', 'crate', 'barrel', 'gas', 'fridge'];
 
   function makeSlots(dock, n) {
     var spacing = 125, out = [];
@@ -3848,7 +4160,7 @@ window.CT = window.CT || {};
     cfg.obstacles = cfg.obstacles || [];
     cfg.lights = cfg.lights || [];
     cfg.traffic = cfg.traffic || null;
-    cfg.delivery = Object.assign({ maxSpeed: 14 }, cfg.delivery || {});
+    cfg.delivery = Object.assign({ maxSpeed: 14 * CT.K }, cfg.delivery || {});
     [cfg.loadStation, cfg.destination].forEach(function (st) {
       st.dockSlots = st.dockSlots || makeSlots(st.dock, cfg.cargo.count);
     });
@@ -3864,18 +4176,18 @@ window.CT = window.CT || {};
     var local = ((n - 1) % 10) / 9;             // difficulty inside the chapter 0..1
     var diff = Math.min(1, 0.12 + 0.6 * k + 0.28 * local);
     var start = 700;
-    var L = Math.round(6200 + n * 400 + rnd() * 1200);
+    var L = Math.round((6200 + n * 400 + rnd() * 1200) * 2.1);
     var Z = start + L;
     var zoneHalf = Math.round(380 - 55 * diff);
 
     // ---- terrain: flat at both stations, rolling hills in between
     var hillAmp = { country: 1, city: 0.45, desert: 0.8, snow: 1.35, night: 0.9 }[theme];
-    var amp = n < 3 ? 0 : (40 + 170 * diff) * hillAmp;
+    var amp = n < 3 ? 0 : (60 + 260 * diff) * hillAmp;
     var maxSlope = 0.06 + 0.09 * diff;
     var terrain = [{ x: -2500, y: 0 }, { x: 1400, y: 0 }];
     var x = 1400, y = 0;
-    while (x < Z - 2200) {
-      var step = 700 + rnd() * 700;
+    while (x < Z - 4000) {
+      var step = 1300 + rnd() * 1400;
       var target = (rnd() * 2 - 1) * amp;
       if (target < -amp * 0.9) target = -amp * 0.9;
       var dy = D.clamp(target - y, -maxSlope * step, maxSlope * step);
@@ -3883,7 +4195,7 @@ window.CT = window.CT || {};
       terrain.push({ x: Math.round(x), y: Math.round(y) });
     }
     var back = Math.max(900, Math.abs(y) / maxSlope);
-    terrain.push({ x: Math.round(Math.max(x + back, Z - 1500)), y: 0 });
+    terrain.push({ x: Math.round(Math.max(x + back, Z - 2400)), y: 0 });
     terrain.push({ x: Z + 3000, y: 0 });
 
     // ---- features placed in the middle stretch without overlapping
@@ -3891,25 +4203,25 @@ window.CT = window.CT || {};
     function freeSpot(len, from, to) {
       for (var tries = 0; tries < 40; tries++) {
         var p = from + rnd() * (to - from - len);
-        if (used.every(function (u) { return p + len < u[0] - 500 || p > u[1] + 500; })) { used.push([p, p + len]); return p; }
+        if (used.every(function (u) { return p + len < u[0] - 1200 || p > u[1] + 1200; })) { used.push([p, p + len]); return p; }
       }
       return null;
     }
-    var midFrom = 2400, midTo = Z - 2000;
+    var midFrom = 3000, midTo = Z - 4200;
 
     var curves = [];
     var nCurves = n < 4 ? 0 : 1 + Math.floor(diff * 4 + rnd());
     for (var i = 0; i < nCurves; i++) {
-      var clen = 700 + rnd() * 900;
+      var clen = 1500 + rnd() * 1900;
       var cx = freeSpot(clen, midFrom, midTo);
       if (cx === null) continue;
       var sharp = 0.35 + rnd() * 0.65 * (0.4 + diff * 0.6);
-      var limit = Math.round((430 - 230 * sharp) / 10) * 10;        // ~155 … ~70 km/h
+      var limit = Math.round((430 - 230 * sharp) / 10) * 10 * CT.K;   // ~155 … ~70 km/h
       curves.push({ x1: Math.round(cx), x2: Math.round(cx + clen), dir: rnd() < 0.5 ? -1 : 1, sharp: sharp, limit: limit });
     }
 
     var lights = [];
-    var lightEvery = { country: 9000, city: 3600, desert: 11000, snow: 8000, night: 4200 }[theme];
+    var lightEvery = { country: 18000, city: 7500, desert: 22000, snow: 16000, night: 8500 }[theme];
     var nLights = n < 3 ? 0 : Math.max(theme === 'city' || theme === 'night' ? 2 : 1, Math.floor(L / lightEvery * (0.6 + diff)));
     for (i = 0; i < nLights; i++) {
       var lx = freeSpot(200, midFrom, midTo);
@@ -3922,7 +4234,7 @@ window.CT = window.CT || {};
     var nBumps = n < 6 ? 0 : Math.floor(diff * 5 + rnd());
     for (i = 0; i < nBumps; i++) {
       var bx = freeSpot(60, midFrom, midTo);
-      if (bx !== null) obstacles.push({ type: 'bump', x: Math.round(bx + 30), limit: 240 });
+      if (bx !== null) obstacles.push({ type: 'bump', x: Math.round(bx + 30), limit: 240 * CT.K });
     }
     lights.sort(function (a, b) { return a.x - b.x; });
     curves.sort(function (a, b) { return a.x1 - b.x1; });
@@ -3932,18 +4244,27 @@ window.CT = window.CT || {};
     var dens = { country: 0.8, city: 1.5, desert: 0.6, snow: 0.7, night: 1.3 }[theme];
     var traffic = n < 2 ? null : {
       density: Math.round((2 + 7 * diff) * dens),
-      speedMin: 170 + 40 * diff,
-      speedMax: 330 + 60 * diff,
-      exitX: Z - 1450
+      speedMin: (170 + 40 * diff) * CT.K,
+      speedMax: (330 + 60 * diff) * CT.K,
+      weave: 0.25 + 0.75 * diff,
+      exitX: Z - 3200
     };
 
     // ---- timing: par for the 3rd star, optional time limit
-    var cruise = 380 - (theme === 'snow' ? 60 : theme === 'desert' ? 30 : 0);
+    var cruise = (380 - (theme === 'snow' ? 60 : theme === 'desert' ? 30 : 0)) * CT.K;
     var driveTime = L / cruise + curves.length * 2.5 + lights.length * 3.5 + obstacles.length * 1.5 + (traffic ? traffic.density * 0.6 : 0);
     var par = Math.round(driveTime + 19);
     var timeLimit = n >= 8 ? Math.round(par * (n >= 30 ? 1.45 : 1.65)) : null;
 
-    var cargo = CARGO[(n + ch) % CARGO.length];
+    var cargo;
+    if (n % 3 === 0) {
+      var items = [];
+      for (var ci = 0; ci < 3; ci++) items.push(MIX[Math.floor(rnd() * MIX.length)]);
+      if (items[0] === items[1] && items[1] === items[2]) items[2] = MIX[(MIX.indexOf(items[2]) + 3) % MIX.length];
+      cargo = { items: items, count: 3 };
+    } else {
+      cargo = { type: CARGO[(n * 2 + ch) % CARGO.length], count: 3 };
+    }
     var st = stations(Z, zoneHalf, theme);
     var meters = Math.round((Z - 1500) * CT.Levels.METERS_PER_UNIT);
 
@@ -3951,7 +4272,7 @@ window.CT = window.CT || {};
       id: n, implemented: true, tutorial: false,
       name: chapter.name + ' ' + (((n - 1) % 10) + 1),
       chapter: ch, chapterName: chapter.name, theme: theme, seed: n * 31 + 5,
-      cargo: { type: cargo.type, label: cargo.label, count: 3, weightEach: cargo.weightEach, fragile: cargo.fragile },
+      cargo: cargo,
       truck: {},
       start: { x: start },
       road: { start: -760, end: Z + 690, terrain: terrain, curves: curves },
@@ -3961,14 +4282,14 @@ window.CT = window.CT || {};
       traffic: traffic,
       lights: lights,
       obstacles: obstacles,
-      delivery: { maxSpeed: 14 },
+      delivery: { maxSpeed: 14 * CT.K },
       par: par,
       timeLimit: timeLimit
     };
   }
 
   CT.Levels = {
-    METERS_PER_UNIT: 0.1,
+    METERS_PER_UNIT: 0.04,
     COUNT: 50,
     CHAPTERS: CHAPTERS,
     stations: stations,
@@ -4052,11 +4373,11 @@ window.CT = window.CT || {};
       var u = upgrades || CT.Storage.getUpgrades();
       var grip = Math.min(1.05, (THEME_GRIP[level.theme] || 1) + u.tyres * 0.085);
       var cfg = {
-        maxSpeed: 500 + u.engine * 66,          // 500 u/s = 180 km/h … 830 u/s = 299 km/h
-        accel: 330 + u.engine * 46,
-        brake: 920 + u.brakes * 170,
-        reverseMax: 170,
-        reverseAccel: 240,
+        maxSpeed: (500 + u.engine * 66) * CT.K,   // 180 km/h … 299 km/h
+        accel: (330 + u.engine * 46) * CT.K,
+        brake: (920 + u.brakes * 170) * CT.K,
+        reverseMax: 170 * CT.K,
+        reverseAccel: 240 * CT.K,
         grip: grip,
         damageMult: 1 - u.suspension * 0.13,
         suspension: u.suspension
@@ -4081,7 +4402,8 @@ window.CT = window.CT || {};
    Levels 2–50 are generated in levels.js (CT.Levels.generateAll at the bottom of this file). */
 (function (CT) {
   'use strict';
-  var st = CT.Levels.stations(5610, 380, 'country');
+  var Z = 12000;
+  var st = CT.Levels.stations(Z, 380, 'country');
   CT.Levels.register({
     id: 1,
     implemented: true,
@@ -4091,13 +4413,13 @@ window.CT = window.CT || {};
     seed: 11,
     tutorial: true,
 
-    cargo: { type: 'box', label: 'Boxes', count: 3, weightEach: 1, fragile: false },
-    truck: { maxSpeedCap: 420 },
+    cargo: { type: 'box', count: 3 },
+    truck: { maxSpeedCap: 360 * CT.K },   // ~130 km/h in the tutorial
     start: { x: 700 },
 
     road: {
-      start: -760, end: 6300,
-      terrain: [{ x: -2000, y: 0 }, { x: 8000, y: 0 }],   // perfectly flat
+      start: -760, end: Z + 690,
+      terrain: [{ x: -2000, y: 0 }, { x: Z + 3000, y: 0 }],   // perfectly flat
       curves: []
     },
 
@@ -4105,16 +4427,16 @@ window.CT = window.CT || {};
     destination: st.destination,
 
     signs: [
-      { x: 1500, text: 'DELIVERY HUB', sub: '→ 410 m', color: '#1f8a43', w: 250 },
-      { x: 2700, style: 'speed', text: '120' },
-      { x: 3900, text: 'HUB AHEAD', sub: 'Slow down →', color: '#2a6fd6', w: 220 },
-      { x: 4520, style: 'warning', text: 'STOP', sub: 'ZONE' }
+      { x: 1500, text: 'DELIVERY HUB', sub: '→ ' + Math.round((Z - 1500) * CT.Levels.METERS_PER_UNIT) + ' m', color: '#1f8a43', w: 250 },
+      { x: 4200, style: 'speed', text: '120' },
+      { x: 8400, text: 'HUB AHEAD', sub: 'Slow down →', color: '#2a6fd6', w: 220 },
+      { x: Z - 1900, style: 'warning', text: 'STOP', sub: 'ZONE' }
     ],
 
     traffic: null,
     lights: [],
     obstacles: [],
-    delivery: { maxSpeed: 14 },
+    delivery: { maxSpeed: 14 * CT.K },
     par: 75,
     timeLimit: null
   });
@@ -4124,10 +4446,12 @@ window.CT = window.CT || {};
 
 </script>
 <script>
-/* game.js — state machine, update loop, traffic/curve/bump/red-light rules, scoring, camera and rendering. */
+/* game.js — state machine, update loop, traffic/curve/bump/red-light rules, worker loading, easy-mode help,
+   scoring, camera, speed effects and rendering. */
 (function (CT) {
   'use strict';
   var D = CT.Draw;
+  var K = CT.K;
 
   var S = {
     MAIN_MENU: 'MAIN_MENU', LOADING: 'LOADING', READY_TO_DRIVE: 'READY_TO_DRIVE', DRIVING: 'DRIVING',
@@ -4137,6 +4461,7 @@ window.CT = window.CT || {};
   var PLAY_STATES = [S.LOADING, S.READY_TO_DRIVE, S.DRIVING, S.ARRIVED, S.DELIVERING];
   var CAMERAS = ['side', 'chase', 'cab'];
   var VIEW_H = 760;
+  var PALLET_Y = 100;
 
   function Game(canvas) {
     this.canvas = canvas;
@@ -4147,15 +4472,17 @@ window.CT = window.CT || {};
     this.t = 0; this.lt = 0;
     this.effects = new CT.Effects();
     this.view3d = new CT.View3D();
-    this.view = { W: 1, H: 1, dpr: 1, scale: 1, groundY: 1, camX: 0, camY: 0, t: 0, lt: 0, shakeX: 0, shakeY: 0 };
+    this.view = { W: 1, H: 1, dpr: 1, scale: 1, baseScale: 1, groundY: 1, camX: 0, camY: 0, t: 0, lt: 0, shakeX: 0, shakeY: 0 };
     this.shake = 0;
     this.fade = 0;
+    this.speedFx = 0;
     this.level = null;
     this.timers = [];
     this.hintKey = '';
     this.zone = { inside: false, ready: false, show: false };
     this.camMode = CAMERAS.indexOf(CT.Storage.getSetting('camera')) >= 0 ? CT.Storage.getSetting('camera') : 'side';
     this.health = 100;
+    this.assist = 0;
     this.setupMenuScene();
   }
 
@@ -4169,9 +4496,9 @@ window.CT = window.CT || {};
     var L = CT.Levels.get(1);
     this.applyPaint();
     this.menuWorld = new CT.World(L);
-    var tr = new CT.Truck({ maxSpeed: 260, accel: 200 });
+    var tr = new CT.Truck({ maxSpeed: 200 * K, accel: 200 * K });
     tr.place(1900, this.menuWorld.heightAt);
-    var cm = new CT.CargoManager(L);
+    var cm = new CT.CargoManager({ cargo: { items: ['crate', 'barrel', 'box'], count: 3 } });
     cm.items.forEach(function (it, i) { cm.placeOnTruck(it, i); it.strap = 1; it.pop = 0; });
     tr.cargoWeight = cm.weightOnTruck();
     this.menuScene = { truck: tr, cargo: cm };
@@ -4184,6 +4511,14 @@ window.CT = window.CT || {};
     this.applyPaint();
     this.level = L;
     this.world = new CT.World(L);
+
+    // easy-mode help after repeated failures
+    var fails = CT.Storage.getFails(L.id);
+    this.assist = L.tutorial ? 0 : fails >= 3 ? 2 : fails >= 2 ? 1 : 0;
+    this.timeLimit = L.timeLimit ? Math.round(L.timeLimit * (1 + 0.3 * this.assist)) : null;
+    this.par = Math.round(L.par * (1 + 0.12 * this.assist));
+    this.damageAssist = 1 - 0.3 * this.assist;
+
     var tr = new CT.Truck(CT.Garage.truckConfig(L));
     tr.minX = L.road.start + 40 - CT.Truck.REAR;
     tr.maxX = L.road.end - 40 - CT.Truck.FRONT;
@@ -4191,19 +4526,23 @@ window.CT = window.CT || {};
     var self = this;
     tr.onImpact = function (speed, dir) { self.onImpact(speed, dir); };
     this.truck = tr;
-    this.cargo = new CT.CargoManager(L);
-    this.loadCrane = new CT.Crane(L.loadStation.crane);
-    this.dropCrane = new CT.Crane(L.destination.crane);
-    this.loadCrane.onSound = this.dropCrane.onSound = function (n) { CT.Audio.play(n); };
+
+    var sx = L.start.x, zc = (L.destination.zone.x1 + L.destination.zone.x2) / 2;
+    this.loadPallets = [0, 1, 2].map(function (i) { return { x: sx - 620 + i * 125, y: PALLET_Y }; });
+    this.dropPallets = [0, 1, 2].map(function (i) { return { x: zc - 650 - i * 125, y: PALLET_Y }; });
+    this.cargo = new CT.CargoManager(L, this.loadPallets);
+    this.loadCrew = new CT.Crew(this, 'load', this.loadPallets);
+    this.loadCrew.assign(this.cargo.items);
+    this.loadCrew.onItem = function (it, counted) { self.onLoaded(it, counted); };
+    this.dropCrew = new CT.Crew(this, 'unload', this.dropPallets);
+    this.dropCrew.onItem = function (it, counted) { self.onDelivered(it, counted); };
+
     this.traffic = L.traffic ? new CT.Traffic(L, this.world) : null;
-    if (this.traffic) this.traffic.init(tr);
+    if (this.traffic) { this.traffic.densityMult = 1 - 0.3 * this.assist; this.traffic.init(tr); }
     this.stats = { time: 0, startX: L.start.x };
     this.health = 100;
     this.crashes = 0; this.violations = 0; this.curveHits = 0; this.bumpHits = 0;
     this.flags = { winShown: false, failShown: false, brakeSqueal: false, curveWarned: {}, timeWarned: false };
-    this.unloadIndex = 0;
-    this.loadQueue = 0;
-    this.unloadDelay = 0;
     this.winTimer = -1; this.failTimer = -1;
     this.smokeT = 0; this.dustT = 0; this.squealT = 0;
     this.lt = 0;
@@ -4211,14 +4550,19 @@ window.CT = window.CT || {};
     this.effects.clear();
     this.zone = { inside: false, ready: false, show: false };
     this.hintKey = '';
-    this.shake = 0; this.fade = 1;
+    this.shake = 0; this.fade = 1; this.speedFx = 0;
     this.result = null; this.failInfo = null;
     CT.Controls.releaseAll();
     this.view.camX = this.cameraTarget(S.LOADING);
     this.view.camY = tr.y;
     this.setState(S.LOADING);
-    CT.UI.enterLevel(L, this.cargo.required);
-    CT.UI.setCargo(0, this.cargo.required, 'Cargo');
+    CT.UI.enterLevel(L, this);
+    CT.UI.setCargo(0, this.cargo.required);
+    // workers start by themselves
+    this.later(0.9, function () { if (self.state === S.LOADING) self.loadCrew.start(); });
+    if (this.assist > 0) {
+      this.later(0.4, function () { CT.UI.toast(self.assist > 1 ? 'Easy mode+: more time, less traffic, tougher cargo' : 'Easy mode: more time and less traffic', 'info'); });
+    }
     return true;
   };
 
@@ -4230,6 +4574,7 @@ window.CT = window.CT || {};
     this.effects.clear();
     this.timers = [];
     this.fade = 1;
+    this.speedFx = 0;
     this.applyPaint();
     this.setState(S.MAIN_MENU);
     CT.UI.showMenu();
@@ -4253,6 +4598,7 @@ window.CT = window.CT || {};
   };
 
   Game.prototype.onEnter = function (s, old) {
+    var self = this;
     switch (s) {
       case S.READY_TO_DRIVE:
         if (old === S.LOADING) {
@@ -4268,7 +4614,10 @@ window.CT = window.CT || {};
       case S.DELIVERING:
         this.cargo.items.forEach(function (it) { if (it.state === CT.CargoManager.STATE.TRUCK) it.strapTarget = 0; });
         CT.Audio.play('strap');
-        this.unloadDelay = 0.7;
+        var onTruck = this.cargo.items.filter(function (it) { return it.state === CT.CargoManager.STATE.TRUCK; })
+          .sort(function (a, b) { return b.slot - a.slot; });               // rear slot to the nearest pallet
+        this.dropCrew.assign(onTruck);
+        this.later(0.35, function () { self.dropCrew.start(); });
         break;
       case S.LEVEL_COMPLETE:
       case S.LEVEL_FAILED:
@@ -4330,6 +4679,12 @@ window.CT = window.CT || {};
     else if (this.state === S.ARRIVED) this.requestDeliver();
   };
 
+  /** Workers start on their own; tapping LOAD only starts them early. */
+  Game.prototype.requestLoad = function () {
+    if (this.state !== S.LOADING) return false;
+    return this.loadCrew.start();
+  };
+
   Game.prototype.cycleCamera = function () {
     var i = (CAMERAS.indexOf(this.camMode) + 1) % CAMERAS.length;
     this.setCamera(CAMERAS[i]);
@@ -4339,8 +4694,7 @@ window.CT = window.CT || {};
     CT.Storage.setSetting('camera', m);
     CT.Audio.play('click');
     CT.UI.setCameraLabel(m);
-    if (this.level && this.isDriving() && m !== 'side') CT.UI.toast(m === 'cab' ? 'Cab view (FPP)' : 'Chase view (TPP)', 'info');
-    else if (this.level && this.isDriving()) CT.UI.toast('Side view', 'info');
+    if (this.level && this.isDriving()) CT.UI.toast(m === 'cab' ? 'Cab view (FPP)' : m === 'chase' ? 'Chase view (TPP)' : 'Side view', 'info');
   };
 
   /** dir: undefined = toggle, 0 = right lane, 1 = left lane */
@@ -4359,61 +4713,33 @@ window.CT = window.CT || {};
     return true;
   };
 
-  Game.prototype.horn = function () {
-    if (!this.level) return;
-    CT.Audio.play('horn');
-  };
+  Game.prototype.horn = function () { if (this.level) CT.Audio.play('horn'); };
 
-  /** Boxes still on the dock that the player has not asked for yet. */
-  Game.prototype.loadsAvailable = function () {
-    var onDock = this.cargo.items.filter(function (i) { return i.state === CT.CargoManager.STATE.DOCK; }).length;
-    var j = this.loadCrane.job;
-    var pendingNow = j && (j.phase === 'toPick' || j.phase === 'lower') ? 1 : 0;
-    return onDock - pendingNow - this.loadQueue;
-  };
-
-  Game.prototype.requestLoad = function () {
-    if (this.state !== S.LOADING) return false;
-    if (this.loadsAvailable() <= 0) return false;
-    CT.Audio.play('click');
-    if (this.loadCrane.busy()) { this.loadQueue++; CT.UI.refreshAction(this); return true; }
-    return this.startLoadJob();
-  };
-
-  Game.prototype.startLoadJob = function () {
-    var item = this.cargo.nextOnDock();
-    var slot = this.cargo.freeSlot();
-    if (!item || slot < 0) return false;
-    var self = this, ST = CT.CargoManager.STATE;
-    this.loadCrane.start({
-      item: item,
-      from: function () { return { x: item.dock.x, y: item.dock.y }; },
-      to: function () { return self.truck.slotWorld(slot); },
-      onAttach: function (it) { it.state = ST.CRANE; },
-      onRelease: function (it) {
-        var counted = self.cargo.placeOnTruck(it, slot);
-        self.truck.cargoWeight = self.cargo.weightOnTruck();
-        self.truck.jolt(30);
-        CT.Audio.play('clunk');
-        self.later(0.18, function () { CT.Audio.play('strap'); });
-        if (counted) {
-          var p = self.truck.slotWorld(slot);
-          self.effects.sparkle(p.x, p.y - 60, 14);
-          self.effects.text(p.x, p.y - 110, '+1', '#ffd34a');
-          CT.UI.setCargo(self.cargo.loadedCount(), self.cargo.required, 'Cargo', true);
-          self.later(0.25, function () { CT.Audio.play('count'); });
-          CT.vibrate(25);
-        }
-      },
-      onDone: function () {
-        if (self.loadQueue > 0 && self.state === S.LOADING) { self.loadQueue--; self.startLoadJob(); }
-        CT.UI.refreshAction(self);
-        self.updateHints(true);
-      }
-    });
-    CT.UI.refreshAction(this);
+  Game.prototype.onLoaded = function (it, counted) {
+    this.truck.cargoWeight = this.cargo.weightOnTruck();
+    this.truck.jolt(30);
+    CT.Audio.play('clunk');
+    var self = this;
+    this.later(0.25, function () { CT.Audio.play('strap'); });
+    if (counted) {
+      var p = this.truck.slotWorld(it.slot);
+      this.effects.sparkle(p.x, p.y - 60, 14);
+      this.effects.text(p.x, p.y - 110, '+1', '#ffd34a');
+      CT.UI.setCargo(this.cargo.loadedCount(), this.cargo.required, true);
+      this.later(0.3, function () { CT.Audio.play('count'); });
+      CT.vibrate(25);
+    }
     this.updateHints(true);
-    return true;
+  };
+
+  Game.prototype.onDelivered = function (it, counted) {
+    if (!counted) return;
+    CT.Audio.play('deliver');
+    this.effects.sparkle(it.x, it.y - 50, 16, '#7dff8a');
+    this.effects.text(it.x, it.y - 110, this.cargo.deliveredCount() + '/' + this.cargo.required, '#7dff8a');
+    CT.UI.setCargo(this.cargo.deliveredCount(), this.cargo.required, true);
+    CT.vibrate(25);
+    this.updateHints(true);
   };
 
   Game.prototype.requestDeliver = function () {
@@ -4424,35 +4750,9 @@ window.CT = window.CT || {};
     return true;
   };
 
-  Game.prototype.startNextUnload = function () {
-    var self = this;
-    var item = this.cargo.nextOnTruck();
-    if (!item || item.strap > 0.02) return;
-    var slot = item.slot;
-    var target = this.level.destination.dockSlots[this.unloadIndex++];
-    this.dropCrane.start({
-      item: item,
-      from: function () { return self.truck.slotWorld(slot); },
-      to: function () { return { x: target.x, y: target.y }; },
-      onAttach: function (it) { self.cargo.liftFromTruck(it); self.truck.cargoWeight = self.cargo.weightOnTruck(); self.truck.jolt(-14); },
-      onRelease: function (it) {
-        it.x = target.x; it.y = target.y; it.rot = 0;
-        if (self.cargo.markDelivered(it)) {
-          CT.Audio.play('deliver');
-          self.effects.sparkle(it.x, it.y - 50, 16, '#7dff8a');
-          self.effects.text(it.x, it.y - 110, self.cargo.deliveredCount() + '/' + self.cargo.required, '#7dff8a');
-          CT.UI.setCargo(self.cargo.deliveredCount(), self.cargo.required, 'Delivered', true);
-          CT.vibrate(25);
-        }
-        self.updateHints(true);
-      }
-    });
-  };
-
   // ================================================================ damage & rules
-  Game.prototype.damage = function (amount, label) {
-    var L = this.level;
-    var mult = (L.cargo.fragile ? 1.8 : 1) * this.truck.cfg.damageMult;
+  Game.prototype.damage = function (amount) {
+    var mult = (this.cargo.fragile ? 1.8 : 1) * this.truck.cfg.damageMult * this.damageAssist;
     var d = amount * mult;
     if (d <= 0) return 0;
     this.health = Math.max(0, this.health - d);
@@ -4464,21 +4764,22 @@ window.CT = window.CT || {};
   };
 
   Game.prototype.onImpact = function (speed, dir) {
-    if (speed < 25) return;
-    var k = Math.min(1, speed / 300);
-    this.cargo.jolt(speed * 0.6, dir > 0 ? 1 : -1);
-    this.truck.jolt(speed * 0.4 * dir);
+    var v = speed / K;
+    if (v < 25) return;
+    var k = Math.min(1, v / 300);
+    this.cargo.jolt(v * 0.6, dir > 0 ? 1 : -1);
+    this.truck.jolt(v * 0.4 * dir);
     this.shake = Math.max(this.shake, 4 + k * 10);
     CT.Audio.play('bump');
     CT.vibrate(Math.round(30 + k * 60));
     var x = this.truck.x + (dir > 0 ? CT.Truck.FRONT : CT.Truck.REAR);
     this.effects.puff(x, this.truck.y, 8);
-    if (speed > 120 && !this.level.tutorial) this.damage((speed - 120) * 0.05, 'wall');
-    if (speed > 80) CT.UI.toast('Bump! Use the brake to stop gently.', 'warn');
+    if (v > 120 && !this.level.tutorial) this.damage((v - 120) * 0.05);
+    if (v > 80) CT.UI.toast('Bump! Use the brake to stop gently.', 'warn');
   };
 
   Game.prototype.crash = function (ev) {
-    var rel = ev.rel;
+    var rel = ev.rel / K;
     if (rel < 25) return;
     var k = Math.min(1, rel / 400);
     this.crashes++;
@@ -4490,17 +4791,16 @@ window.CT = window.CT || {};
     var x = this.truck.x + (ev.front ? CT.Truck.FRONT : CT.Truck.REAR);
     this.effects.puff(x, this.truck.y - 30, 14);
     this.effects.sparkle(x, this.truck.y - 50, 10, '#ffffff');
-    this.damage(8 + rel * 0.07, 'crash');
+    this.damage(8 + rel * 0.07);
     CT.UI.toast('Crash! Keep a safe distance from cars.', 'bad');
   };
 
   Game.prototype.checkRules = function (dt, prevFront, prevX) {
     var L = this.level, tr = this.truck, self = this;
     var front = tr.x + CT.Truck.FRONT;
-    // red lights
     (L.lights || []).forEach(function (l) {
       var stop = l.x - 60;
-      if (prevFront < stop && front >= stop && tr.v > 15) {
+      if (prevFront < stop && front >= stop && tr.v > 15 * K) {
         if (CT.Traffic.lightState(l, self.lt) === 'red') {
           self.violations++;
           CT.Audio.play('alarm');
@@ -4509,29 +4809,26 @@ window.CT = window.CT || {};
         }
       }
     });
-    // speed bumps (front axle)
     (L.obstacles || []).forEach(function (o) {
       if (o.type !== 'bump') return;
-      var wx = tr.x + 170;          // front wheel
-      var pw = prevX + 170;
+      var wx = tr.x + 170, pw = prevX + 170;
       if ((pw < o.x && wx >= o.x) || (pw > o.x && wx <= o.x)) {
         var v = Math.abs(tr.v);
-        tr.jolt(-Math.min(160, v * 0.25));
+        tr.jolt(-Math.min(160, v / K * 0.25));
         CT.Audio.play('bump');
         if (v > o.limit) {
           self.bumpHits++;
-          self.cargo.jolt(v * 0.4, 1);
+          self.cargo.jolt(v / K * 0.4, 1);
           self.shake = Math.max(self.shake, 5);
-          self.damage((v - o.limit) * 0.06, 'bump');
+          self.damage((v - o.limit) / K * 0.06);
           CT.UI.toast('Too fast over the speed bump!', 'warn');
         }
       }
     });
-    // curves
     var c = this.world.curveAt(tr.x);
-    if (c && Math.abs(tr.v) > c.limit + 12) {
-      var over = Math.abs(tr.v) - c.limit;
-      this.damage(over * 0.032 * dt * (1.4 - (tr.cfg.grip || 1) * 0.4), 'curve');
+    if (c && Math.abs(tr.v) > c.limit + 12 * K) {
+      var over = (Math.abs(tr.v) - c.limit) / K;
+      this.damage(over * 0.032 * dt * (1.4 - (tr.cfg.grip || 1) * 0.4));
       this.cargo.jolt(over * dt * 6, c.dir);
       this.squealT -= dt;
       if (this.squealT <= 0) { CT.Audio.play('squeal'); this.squealT = 0.6; }
@@ -4546,7 +4843,14 @@ window.CT = window.CT || {};
   Game.prototype.fail = function (title, text) {
     if (this.flags.failShown || this.flags.winShown) return;
     this.flags.failShown = true;
-    this.failInfo = { title: title, text: text };
+    var n = CT.Storage.addFail(this.level.id);
+    var help = '';
+    if (!this.level.tutorial) {
+      if (n === 2) help = ' Next try is easier: more time, less traffic and tougher cargo.';
+      else if (n >= 3) help = ' Next try is extra easy, you can do it!';
+      else help = ' Fail once more and the level gets easier.';
+    }
+    this.failInfo = { title: title, text: text + help, fails: n };
     this.setState(S.LEVEL_FAILED);
     CT.Audio.play('fail');
     CT.vibrate([80, 60, 80]);
@@ -4582,7 +4886,7 @@ window.CT = window.CT || {};
     var m = this.menuScene;
     m.truck.update(dt, { gas: true, brake: false, reverse: false }, this.menuWorld.heightAt, true);
     m.cargo.update(dt, m.truck.accelSm);
-    if (m.truck.x > 4200) { m.truck.place(1900, this.menuWorld.heightAt); m.truck.v = 220; this.view.camX = this.cameraTarget(S.MAIN_MENU); this.fade = 1; }
+    if (m.truck.x > 9500) { m.truck.place(1900, this.menuWorld.heightAt); m.truck.v = 150 * K; this.view.camX = this.cameraTarget(S.MAIN_MENU); this.fade = 1; }
     this.emitDriveFx(m.truck, dt, 0.6);
   };
 
@@ -4602,16 +4906,16 @@ window.CT = window.CT || {};
     }
     if (drive && !L.tutorial) this.checkRules(dt, prevFront, prevX);
     this.cargo.update(dt, tr.accelSm);
-    this.loadCrane.update(dt);
-    this.dropCrane.update(dt);
+    this.loadCrew.update(dt);
+    this.dropCrew.update(dt);
 
     if (st === S.LOADING) {
-      if (this.cargo.loadedCount() >= this.cargo.required && !this.loadCrane.busy() && this.cargo.allStrapped()) this.setState(S.READY_TO_DRIVE);
+      if (this.cargo.loadedCount() >= this.cargo.required && this.cargo.allStrapped()) this.setState(S.READY_TO_DRIVE);
+      else CT.UI.setProgress(this.cargo.loadedCount() / this.cargo.required, this.loadCrew.remaining() + (this.loadCrew.started ? 0.4 : 1.3));
     } else if (st === S.READY_TO_DRIVE) {
       if (input.gas || input.reverse) this.setState(S.DRIVING);
     }
 
-    // destination detection
     var z = L.destination.zone;
     var rear = tr.x + CT.Truck.REAR, front = tr.x + CT.Truck.FRONT;
     this.zone.inside = rear >= z.x1 - 60 && front <= z.x2 + 60;
@@ -4623,23 +4927,21 @@ window.CT = window.CT || {};
     else if (this.state === S.ARRIVED && !this.zone.ready) this.setState(S.DRIVING);
 
     if (this.state === S.DELIVERING) {
-      if (this.unloadDelay > 0) this.unloadDelay -= dt;
-      else if (!this.dropCrane.busy() && this.cargo.onTruckCount() > 0) this.startNextUnload();
-      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.cargo.required && !this.dropCrane.busy()) {
+      CT.UI.setProgress(this.cargo.deliveredCount() / this.cargo.required, this.dropCrew.remaining());
+      if (!this.flags.winShown && this.cargo.deliveredCount() >= this.cargo.required) {
         this.flags.winShown = true;
         this.completeLevel();
       }
     }
-    // time limit
-    if (L.timeLimit && !ended && this.state !== S.DELIVERING) {
-      var left = L.timeLimit - this.stats.time;
+    if (this.timeLimit && !ended && this.state !== S.DELIVERING && this.state !== S.LOADING) {
+      var left = this.timeLimit - this.stats.time;
       if (left < 15 && !this.flags.timeWarned) { this.flags.timeWarned = true; CT.Audio.play('alarm'); CT.UI.toast('15 seconds left!', 'warn'); }
       if (left <= 0) this.fail("Time's up", 'The delivery took too long. Upgrade the engine for more speed, or take bends and lights more smoothly.');
     }
     if (this.winTimer > 0) { this.winTimer -= dt; if (this.winTimer <= 0) CT.UI.showWin(this.result); }
     if (this.failTimer > 0) { this.failTimer -= dt; if (this.failTimer <= 0) CT.UI.showFail(this.failInfo, this); }
 
-    if (tr.braking && Math.abs(tr.v) > 200) { if (!this.flags.brakeSqueal) { this.flags.brakeSqueal = true; CT.Audio.play('brake'); } }
+    if (tr.braking && Math.abs(tr.v) > 200 * K) { if (!this.flags.brakeSqueal) { this.flags.brakeSqueal = true; CT.Audio.play('brake'); } }
     else if (!tr.braking) this.flags.brakeSqueal = false;
 
     if (drive || this.state === S.DELIVERING) CT.Audio.engineSet(tr.speedRatio(), tr.throttle + tr.revThrottle * 0.7);
@@ -4652,22 +4954,24 @@ window.CT = window.CT || {};
   Game.prototype.completeLevel = function () {
     var L = this.level, time = this.stats.time;
     var safe = this.crashes === 0 && this.violations === 0 && this.health >= 90;
-    var fast = time <= L.par;
+    var fast = time <= this.par;
     var stars = 1 + (safe ? 1 : 0) + (fast ? 1 : 0);
     var saved = CT.Storage.completeLevel(L.id, { stars: stars, time: time });
+    CT.Storage.clearFails(L.id);
     var coins = CT.Garage.reward(L, stars, saved);
     CT.Storage.addCoins(coins);
     var next = CT.Levels.get(L.id + 1);
+    var label = CT.CargoManager.label(L.cargo).toLowerCase();
     this.result = {
       levelId: L.id, levelName: L.name,
       delivered: this.cargo.deliveredCount(), required: this.cargo.required,
       distance: this.truck.distance * CT.Levels.METERS_PER_UNIT,
-      time: time, par: L.par, stars: stars, isBest: saved.isBest, coins: coins,
+      time: time, par: this.par, stars: stars, isBest: saved.isBest, coins: coins,
       health: this.health, crashes: this.crashes, violations: this.violations,
       criteria: [
-        { ok: true, title: 'Cargo delivered', detail: this.cargo.deliveredCount() + '/' + this.cargo.required + ' ' + (L.cargo.label || 'boxes').toLowerCase() },
+        { ok: true, title: 'Cargo delivered', detail: this.cargo.deliveredCount() + '/' + this.cargo.required + ' · ' + label },
         { ok: safe, title: 'Safe driving', detail: 'Cargo ' + Math.round(this.health) + '% · ' + this.crashes + ' crash' + (this.crashes === 1 ? '' : 'es') + ' · ' + this.violations + ' red light' + (this.violations === 1 ? '' : 's') },
-        { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(L.par) + ')' }
+        { ok: fast, title: 'Fast delivery', detail: CT.UI.fmtTime(time) + ' (target ' + CT.UI.fmtTime(this.par) + ')' }
       ],
       hasNext: !!(next && next.implemented)
     };
@@ -4694,7 +4998,7 @@ window.CT = window.CT || {};
       if (this.dustT <= 0) {
         var w = tr.rearWheelWorld();
         this.effects.dust(tr.v > 0 ? w.x - 20 : tr.x + CT.Truck.FRONT - 50, w.y, tr.v > 0 ? 1 : -1, sr);
-        this.dustT = 0.07;
+        this.dustT = 0.06;
       }
     }
   };
@@ -4702,18 +5006,19 @@ window.CT = window.CT || {};
   // ================================================================ hints
   Game.prototype.ahead = function () {
     var L = this.level, tr = this.truck, front = tr.x + CT.Truck.FRONT, out = {}, self = this;
+    var look = 1100 * K;
     (L.lights || []).forEach(function (l) {
       var d = l.x - 60 - front;
-      if (d > 0 && d < 1100 && !out.light) { var s = CT.Traffic.lightState(l, self.lt); if (s !== 'green') out.light = { d: d, s: s }; }
+      if (d > 0 && d < look * 1.4 && !out.light) { var s = CT.Traffic.lightState(l, self.lt); if (s !== 'green') out.light = { d: d, s: s }; }
     });
-    (L.road.curves || []).forEach(function (c) { var d = c.x1 - front; if (d > 0 && d < 1300 && !out.curve) out.curve = { d: d, c: c }; });
-    (L.obstacles || []).forEach(function (o) { var d = o.x - front; if (d > 0 && d < 900 && !out.bump) out.bump = { d: d, o: o }; });
+    (L.road.curves || []).forEach(function (c) { var d = c.x1 - front; if (d > 0 && d < look * 1.4 && !out.curve) out.curve = { d: d, c: c }; });
+    (L.obstacles || []).forEach(function (o) { var d = o.x - front; if (d > 0 && d < look && !out.bump) out.bump = { d: d, o: o }; });
     if (this.traffic) {
       var lane = tr.laneIndex();
       this.traffic.cars.forEach(function (c) {
-        if (c.lane !== lane) return;
+        if (CT.Traffic.carLanes(c).indexOf(lane) < 0) return;
         var d = c.x - c.len / 2 - front;
-        if (d > 0 && d < 700 && c.v < tr.v - 40 && (!out.car || d < out.car.d)) out.car = { d: d, c: c };
+        if (d > 0 && d < 750 * K && c.v < tr.v - 40 * K && (!out.car || d < out.car.d)) out.car = { d: d, c: c };
       });
     }
     return out;
@@ -4724,13 +5029,12 @@ window.CT = window.CT || {};
     var st = this.state, L = this.level, tr = this.truck, z = L.destination.zone, key, title, sub = '', tone = '';
     var remaining = Math.max(0, ((z.x1 + z.x2) / 2 - tr.x) * CT.Levels.METERS_PER_UNIT);
     var kmh = function (v) { return Math.round(CT.Garage.kmh(v)); };
+    var label = CT.CargoManager.label(L.cargo).toLowerCase();
     switch (st) {
       case S.LOADING:
         var n = this.cargo.loadedCount();
-        if (this.loadCrane.busy()) { key = 'loading-busy'; title = 'Loading ' + (L.cargo.label || 'cargo').toLowerCase() + ' ' + Math.min(this.cargo.required, n + 1) + ' of ' + this.cargo.required + '…'; sub = 'The crane is placing it on your truck'; }
-        else if (n === 0) { key = 'load-0'; title = 'Load the cargo onto your truck.'; sub = 'Tap LOAD to lift each item with the crane'; }
-        else if (n < this.cargo.required) { key = 'load-' + n; title = 'Nice! ' + n + '/' + this.cargo.required + ' loaded'; sub = 'Tap LOAD again'; }
-        else { key = 'load-strap'; title = 'Strapping the cargo…'; }
+        if (n >= this.cargo.required) { key = 'load-strap'; title = 'Strapping the cargo…'; }
+        else { key = 'load-' + n; title = 'Workers are loading ' + label; sub = n + '/' + this.cargo.required + ' on the truck'; }
         break;
       case S.READY_TO_DRIVE:
         key = 'ready'; title = "Cargo loaded! Let's drive."; sub = 'Hold GAS to drive to the ' + L.destination.name; tone = 'good';
@@ -4741,11 +5045,11 @@ window.CT = window.CT || {};
         else if (this.zone.inside && Math.abs(tr.v) >= L.delivery.maxSpeed) { key = 'brake'; title = 'You are in the zone!'; sub = 'Hold BRAKE to stop'; tone = 'warn'; }
         else if (this.zone.inside && tr.laneIndex() === -1) { key = 'lanechg'; title = 'Finish the lane change'; }
         else if (this.zone.inside) { key = 'release'; title = 'Let go of the pedals'; sub = 'Stop completely to deliver'; }
-        else if (rear < z.x1 - 60 && front > z.x1 - 1600) { key = 'near'; title = 'Stop in the green zone'; sub = 'Ease off and use BRAKE'; }
-        else if (cv && Math.abs(tr.v) > cv.limit + 12) { key = 'curve-now'; title = 'Too fast for this bend!'; sub = 'Slow down to ' + kmh(cv.limit) + ' km/h'; tone = 'warn'; }
+        else if (rear < z.x1 - 60 && front > z.x1 - 1600 * K) { key = 'near'; title = 'Stop in the green zone'; sub = 'Ease off and use BRAKE'; }
+        else if (cv && Math.abs(tr.v) > cv.limit + 12 * K) { key = 'curve-now'; title = 'Too fast for this bend!'; sub = 'Slow down to ' + kmh(cv.limit) + ' km/h'; tone = 'warn'; }
         else if (A.light && A.light.s === 'red') { key = 'red'; title = 'Red light ahead'; sub = 'Stop before the white line'; tone = 'warn'; }
         else if (A.light) { key = 'yellow'; title = 'Light is changing'; sub = 'Get ready to stop'; tone = 'warn'; }
-        else if (A.car) { key = 'traffic'; title = 'Slow traffic ahead'; sub = 'Brake, or tap LANE to overtake'; tone = 'warn'; }
+        else if (A.car) { key = 'traffic'; title = 'Slow traffic ahead'; sub = 'Brake, or steer LEFT / RIGHT to overtake'; tone = 'warn'; }
         else if (A.curve && Math.abs(tr.v) > A.curve.c.limit) { key = 'curve'; title = 'Bend ahead'; sub = 'Slow to ' + kmh(A.curve.c.limit) + ' km/h'; tone = 'warn'; }
         else if (A.bump && Math.abs(tr.v) > A.bump.o.limit) { key = 'bump'; title = 'Speed bump ahead'; sub = 'Slow to ' + kmh(A.bump.o.limit) + ' km/h'; tone = 'warn'; }
         else if (tr.x < L.start.x - 60) { key = 'wrong'; title = 'The hub is the other way'; sub = 'Hold GAS to drive forward'; tone = 'warn'; }
@@ -4755,7 +5059,7 @@ window.CT = window.CT || {};
         key = 'arrived'; title = 'Perfect stop!'; sub = 'Tap DELIVER to unload'; tone = 'good';
         break;
       case S.DELIVERING:
-        key = 'deliver-' + this.cargo.deliveredCount(); title = 'Unloading… ' + this.cargo.deliveredCount() + '/' + this.cargo.required; sub = 'The hub crane is taking your cargo';
+        key = 'deliver-' + this.cargo.deliveredCount(); title = 'Workers are unloading…'; sub = this.cargo.deliveredCount() + '/' + this.cargo.required + ' delivered';
         break;
       case S.LEVEL_COMPLETE:
         key = 'done'; title = 'DELIVERY SUCCESSFUL!'; tone = 'good';
@@ -4780,9 +5084,9 @@ window.CT = window.CT || {};
     if (state === S.MAIN_MENU) return this.menuScene.truck.x - halfW * 0.22;
     var L = this.level, tr = this.truck, target;
     var s = state === S.PAUSED ? this.prevState : state;
-    if (s === S.LOADING) target = (L.loadStation.dock.x + tr.x) / 2 + 40;
-    else if (s === S.DELIVERING || s === S.LEVEL_COMPLETE) target = (L.destination.dock.x + tr.x) / 2 + 30;
-    else target = tr.x + Math.min(halfW * 0.3, 160) + D.clamp(tr.v * 0.45, -160, 320);
+    if (s === S.LOADING) target = tr.x - 150;
+    else if (s === S.DELIVERING || s === S.LEVEL_COMPLETE) target = tr.x - 300;
+    else target = tr.x + Math.min(halfW * 0.3, 160) + D.clamp(tr.v * 0.2, -160, 480);
     var lo = L.road.start - 260 + halfW, hi = L.road.end + 320 - halfW;
     if (lo < hi) target = D.clamp(target, lo, hi);
     return target;
@@ -4791,12 +5095,19 @@ window.CT = window.CT || {};
   Game.prototype.updateCamera = function (dt) {
     var target = this.cameraTarget(this.state);
     var k = this.state === S.MAIN_MENU ? 4 : 2.6;
-    if (this.state !== S.MAIN_MENU && Math.abs(this.truck.v) > 400) k = 4;
+    var inLevel = this.state !== S.MAIN_MENU && this.truck;
+    if (inLevel && Math.abs(this.truck.v) > 300 * K) k = 5;
     this.view.camX += (target - this.view.camX) * Math.min(1, dt * k);
     var ty = this.state === S.MAIN_MENU ? this.menuScene.truck.y : this.truck.y;
     this.view.camY += (ty - this.view.camY) * Math.min(1, dt * 3);
-    this.view.shakeX = this.shake ? (Math.random() - 0.5) * this.shake : 0;
-    this.view.shakeY = this.shake ? (Math.random() - 0.5) * this.shake : 0;
+    // speed feel: zoom out a little and rumble at high speed
+    var fx = inLevel ? D.clamp(Math.abs(CT.Garage.kmh(this.truck.v)) / 300, 0, 1) : 0;
+    this.speedFx += (fx - this.speedFx) * Math.min(1, dt * 2);
+    this.view.scale = this.view.baseScale * (1 - 0.14 * this.speedFx);
+    var rumble = this.speedFx > 0.45 ? (this.speedFx - 0.45) * 3 : 0;
+    var sh = this.shake + rumble;
+    this.view.shakeX = sh ? (Math.random() - 0.5) * sh : 0;
+    this.view.shakeY = sh ? (Math.random() - 0.5) * sh : 0;
   };
 
   Game.prototype.resize = function (w, h, dpr) {
@@ -4804,9 +5115,10 @@ window.CT = window.CT || {};
     v.W = w; v.H = h; v.dpr = dpr;
     var portrait = h > w * 1.05;
     var short = !portrait && h < 520;
-    v.scale = Math.min(h / (short ? 900 : VIEW_H), w / 980);
-    if (portrait) v.scale = w / 900;
-    v.groundY = portrait ? h * 0.6 : short ? h * 0.63 : h * 0.745;
+    v.baseScale = Math.min(h / (short ? 900 : VIEW_H), w / 980);
+    if (portrait) v.baseScale = w / 900;
+    v.scale = v.baseScale * (1 - 0.14 * this.speedFx);
+    v.groundY = portrait ? h * 0.6 : short ? h * 0.6 : h * 0.7;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
   };
@@ -4821,7 +5133,6 @@ window.CT = window.CT || {};
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (this.use3D()) {
       this.view3d.render(ctx, v, this, this.camMode);
-      CT.World.setLayer(ctx, v, 1);
       if (this.fade > 0) this.drawFade(ctx);
       return;
     }
@@ -4835,20 +5146,8 @@ window.CT = window.CT || {};
     world.drawVerge(ctx, v);
     world.drawProps(ctx, v);
     world.drawStations(ctx, v);
-
-    CT.World.setLayer(ctx, v, 1);
-    if (!inMenu) { this.loadCrane.drawStructure(ctx); this.dropCrane.drawStructure(ctx); }
-    else this.drawMenuCranes(ctx);
-    cargo.drawWorld(ctx, function (it) { return it.state === ST.DOCK || it.state === ST.STORED; });
-
     world.drawRoad(ctx, v, inMenu ? null : this.zone);
 
-    CT.World.setLayer(ctx, v, 1);
-    if (!inMenu) {
-      this.loadCrane.drawRig(ctx);
-      this.dropCrane.drawRig(ctx);
-      cargo.drawWorld(ctx, function (it) { return it.state === ST.CRANE; });
-    }
     var drawTruck = function () {
       CT.World.setLayer(ctx, v, 1);
       truck.draw(ctx, {
@@ -4864,12 +5163,38 @@ window.CT = window.CT || {};
 
     world.drawForeground(ctx, v);
     CT.World.setLayer(ctx, v, 1);
+    if (!inMenu) {
+      this.loadCrew.drawPallets(ctx);
+      this.dropCrew.drawPallets(ctx);
+      cargo.drawWorld(ctx, function (it) { return it.state === ST.DOCK || it.state === ST.STORED; });
+      this.loadCrew.draw(ctx, this.t);
+      this.dropCrew.draw(ctx, this.t);
+    }
     this.effects.draw(ctx, this.t);
 
     if (!inMenu && this.zone.show) world.drawGuide(ctx, v, this.zone);
     world.drawWeather(ctx, v);
+    this.drawSpeedStreaks(ctx);
     if (!inMenu && (this.state === S.DRIVING || this.state === S.READY_TO_DRIVE)) this.drawEdgeIndicator(ctx);
     if (this.fade > 0) this.drawFade(ctx);
+  };
+
+  /** Horizontal wind streaks in the side view at high speed. */
+  Game.prototype.drawSpeedStreaks = function (ctx) {
+    var fx = this.speedFx;
+    if (fx < 0.4 || !this.truck || this.state === S.MAIN_MENU) return;
+    var v = this.view, k = (fx - 0.4) / 0.6, n = Math.round(8 + 22 * k);
+    ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
+    ctx.lineCap = 'round';
+    for (var i = 0; i < n; i++) {
+      var h1 = Math.abs(Math.sin(i * 91.7)) % 1, h2 = Math.abs(Math.sin(i * 37.3)) % 1;
+      var y = v.H * (0.12 + 0.8 * h1);
+      var len = v.W * (0.08 + 0.18 * k) * (0.5 + h2);
+      var x = v.W - ((this.t * v.W * (1.6 + 2.4 * k) * (0.6 + h2) + h2 * v.W * 3) % (v.W + len * 2)) + len;
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.1 + 0.25 * k) * (0.4 + h2 * 0.6) + ')';
+      ctx.lineWidth = 1 + 2 * h2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+    }
   };
 
   Game.prototype.drawFade = function (ctx) {
@@ -4877,14 +5202,6 @@ window.CT = window.CT || {};
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
     ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, this.fade) * 0.9 + ')';
     ctx.fillRect(0, 0, v.W, v.H);
-  };
-
-  Game.prototype.drawMenuCranes = function (ctx) {
-    if (!this._menuCranes) {
-      var L = CT.Levels.get(1);
-      this._menuCranes = [new CT.Crane(L.loadStation.crane), new CT.Crane(L.destination.crane)];
-    }
-    this._menuCranes.forEach(function (c) { c.drawStructure(ctx); c.drawRig(ctx); });
   };
 
   Game.prototype.drawEdgeIndicator = function (ctx) {
@@ -4901,7 +5218,8 @@ window.CT = window.CT || {};
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-30, -24); ctx.lineTo(-30, -10); ctx.lineTo(-62, -10); ctx.lineTo(-62, 10); ctx.lineTo(-30, 10); ctx.lineTo(-30, 24); ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.font = '20px "Lilita One", "Arial Black", sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 5; ctx.strokeText(meters + ' m', -70, 1); ctx.fillStyle = '#fff'; ctx.fillText(meters + ' m', -70, 1);
+    var txt = meters >= 1000 ? (meters / 1000).toFixed(1) + ' km' : meters + ' m';
+    ctx.lineWidth = 5; ctx.strokeText(txt, -70, 1); ctx.fillStyle = '#fff'; ctx.fillText(txt, -70, 1);
     ctx.restore();
   };
 
@@ -4926,6 +5244,7 @@ window.CT = window.CT || {};
   var ICONS = { engine: '⚙️', tyres: '🛞', suspension: '🔩', brakes: '🛑' };
   var CAM_LABEL = { side: 'SIDE', chase: 'TPP', cab: 'FPP' };
 
+  function D_clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function fmtTime(sec) {
     sec = Math.max(0, sec);
     var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
@@ -4954,7 +5273,7 @@ window.CT = window.CT || {};
       ['menu', 'hud', 'pause', 'win', 'fail', 'settings', 'levels', 'garage', 'btnPlay', 'playLevel', 'btnSettings', 'btnSoundMenu', 'btnSoundPause',
         'btnLevels', 'btnGarage', 'menuCoins', 'menuStars', 'menuDone', 'menuBar',
         'cargoCount', 'healthBar', 'progFill', 'progTruck', 'distLeft', 'destName', 'speedVal', 'timerChip', 'timerVal', 'btnPause', 'camLabel',
-        'banner', 'bannerTitle', 'bannerSub', 'btnAction', 'actionText', 'actionIcon', 'actionHint', 'lockNote', 'btnLane',
+        'banner', 'bannerTitle', 'bannerSub', 'bannerProg', 'bannerBar', 'bannerTime', 'easyTag', 'btnAction', 'actionText', 'actionIcon', 'actionHint', 'lockNote', 'laneBtns',
         'btnResume', 'btnRestart', 'btnResetTruck', 'btnMenuFromPause',
         'winLevel', 'winStars', 'winCriteria', 'statDist', 'statTime', 'statCoins', 'bestNote', 'btnNext', 'btnWinRestart', 'btnWinGarage', 'btnWinMenu',
         'failTitle', 'failText', 'btnRetry', 'btnFailGarage', 'btnFailMenu',
@@ -4965,7 +5284,7 @@ window.CT = window.CT || {};
       el.cargoChip = document.querySelector('.cargo-chip');
       el.levelChipNum = document.querySelector('.level-chip .lvl-num');
       el.levelChipName = document.querySelector('.level-chip .lvl-name');
-      el.pedals = { gas: document.querySelector('.pedal-gas'), brake: document.querySelector('.pedal-brake'), reverse: document.querySelector('.pedal-reverse'), lane: el.btnLane };
+      el.pedals = { gas: document.querySelector('.pedal-gas'), brake: document.querySelector('.pedal-brake'), reverse: document.querySelector('.pedal-reverse'), lane: el.laneBtns };
 
       tap(el.btnPlay, function () { UI.play(CT.Levels.nextToPlay()); });
       tap(el.btnSettings, function () { UI.openSettings(); });
@@ -5018,6 +5337,8 @@ window.CT = window.CT || {};
       });
       CT.Controls.on('action', function () { game.action(); });
       CT.Controls.on('lane', function (dir) { game.requestLane(dir); });
+      CT.Controls.on('laneLeft', function () { game.requestLane(1); });
+      CT.Controls.on('laneRight', function () { game.requestLane(0); });
       CT.Controls.on('camera', function () { game.cycleCamera(); });
       CT.Controls.on('horn', function () { game.horn(); });
       CT.Controls.on('pause', function () {
@@ -5153,15 +5474,18 @@ window.CT = window.CT || {};
       setTimeout(function () { try { el.btnPlay.focus({ preventScroll: true }); } catch (e) {} }, 50);
     },
 
-    enterLevel: function (L) {
+    enterLevel: function (L, g) {
       last = {};
       ['menu', 'pause', 'win', 'fail', 'levels', 'garage'].forEach(function (k) { el[k].hidden = true; });
       el.hud.hidden = false;
       el.levelChipNum.textContent = L.id;
       el.levelChipName.textContent = L.name;
       el.destName.textContent = L.destination.name;
-      el.timerChip.hidden = !L.timeLimit;
-      el.btnLane.hidden = !L.traffic;
+      el.timerChip.hidden = !g.timeLimit;
+      el.laneBtns.hidden = !L.traffic;
+      el.easyTag.hidden = !g.assist;
+      el.easyTag.textContent = g.assist > 1 ? 'EASY+' : 'EASY';
+      el.bannerProg.hidden = true;
       this.setHealth(100);
       toastUntil = 0;
       el.banner.classList.remove('hide');
@@ -5174,6 +5498,7 @@ window.CT = window.CT || {};
       el.btnPause.hidden = s === ST.LEVEL_COMPLETE || s === ST.LEVEL_FAILED;
       if (s !== ST.LOADING) el.lockNote.hidden = true;
       if (s === ST.LEVEL_COMPLETE) el.banner.classList.add('hide');
+      if (s !== ST.LOADING && s !== ST.DELIVERING) el.bannerProg.hidden = true;
       this.refreshAction(g);
     },
 
@@ -5182,18 +5507,15 @@ window.CT = window.CT || {};
       var b = el.btnAction, mode, text, icon, hint = '', disabled = false;
       switch (s) {
         case ST.LOADING:
-          var avail = g.loadsAvailable(), asked = g.cargo.required - avail;
-          if (avail > 0) { mode = 'load'; text = 'LOAD'; icon = 'load'; hint = 'Item ' + (asked + 1) + ' of ' + g.cargo.required; }
-          else if (g.cargo.loadedCount() >= g.cargo.required) { mode = 'load'; text = 'STRAPPING'; icon = 'wait'; disabled = true; }
-          else { mode = 'load'; text = 'LOADING'; icon = 'wait'; disabled = true; }
+          mode = 'hidden';                                   // workers load by themselves; the timer is in the banner
           break;
         case ST.READY_TO_DRIVE: case ST.DRIVING:
-          var nearZone = g.level && (g.level.tutorial || (g.level.destination.zone.x1 - (g.truck.x + CT.Truck.FRONT)) < 1800);
+          var nearZone = g.level && (g.level.tutorial || (g.level.destination.zone.x1 - (g.truck.x + CT.Truck.FRONT)) < 1800 * CT.K);
           mode = nearZone ? 'deliver' : 'hidden'; text = 'DELIVER'; icon = 'deliver'; disabled = true; hint = 'Stop in the green zone'; break;
         case ST.ARRIVED:
           mode = 'deliver'; text = 'DELIVER'; icon = 'deliver'; hint = 'Tap to unload'; break;
         case ST.DELIVERING:
-          mode = 'deliver'; text = 'UNLOADING'; icon = 'wait'; disabled = true; break;
+          mode = 'hidden'; break;
         default: mode = 'hidden';
       }
       b.hidden = mode === 'hidden';
@@ -5232,9 +5554,16 @@ window.CT = window.CT || {};
       toastTimer = setTimeout(function () { toastUntil = 0; if (game.level) game.updateHints(true); }, 2050);
     },
 
-    setCargo: function (n, total, label, bump) {
+    setCargo: function (n, total, bump) {
       el.cargoCount.textContent = n + '/' + total;
       if (bump) { el.cargoChip.classList.remove('bump'); void el.cargoChip.offsetWidth; el.cargoChip.classList.add('bump'); }
+    },
+    /** Loading / unloading progress with a countdown in the banner. */
+    setProgress: function (frac, secs) {
+      if (el.bannerProg.hidden) el.bannerProg.hidden = false;
+      var w = Math.round(D_clamp(frac, 0, 1) * 100) + '%';
+      if (last.prog !== w) { last.prog = w; el.bannerBar.style.width = w; }
+      setText(el.bannerTime, 'ptime', fmtTime(Math.ceil(Math.max(0, secs))));
     },
     setHealth: function (h, hurt) {
       el.healthBar.style.width = Math.max(0, h) + '%';
@@ -5256,10 +5585,10 @@ window.CT = window.CT || {};
       setText(el.speedVal, 'spd', String(Math.round(Math.abs(CT.Garage.kmh(tr.v)))));
       var cabView = g.use3D() && g.camMode === 'cab';
       if (last.cab !== cabView) { last.cab = cabView; el.hud.classList.toggle('cab', cabView); }
-      var near = (L.destination.zone.x1 - (tr.x + CT.Truck.FRONT)) < 1800;
+      var near = (L.destination.zone.x1 - (tr.x + CT.Truck.FRONT)) < 1800 * CT.K;
       if (last.near !== near) { last.near = near; this.refreshAction(g); }
-      if (L.timeLimit) {
-        var left = L.timeLimit - g.stats.time;
+      if (g.timeLimit) {
+        var left = g.timeLimit - g.stats.time;
         setText(el.timerVal, 'tm', fmtTime(Math.ceil(left)));
         var low = left < 15;
         if (last.low !== low) { last.low = low; el.timerChip.classList.toggle('low', low); }

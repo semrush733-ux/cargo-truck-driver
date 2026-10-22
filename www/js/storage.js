@@ -9,7 +9,8 @@ window.CT = window.CT || {};
     coins: 0,
     upgrades: { engine: 0, tyres: 0, suspension: 0, brakes: 0 },
     paints: ['orange'],
-    paint: 'orange'
+    paint: 'orange',
+    fails: {}
   };
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -26,6 +27,7 @@ window.CT = window.CT || {};
       d.upgrades = Object.assign(d.upgrades, p.upgrades || {});
       d.paints = Array.isArray(p.paints) && p.paints.length ? p.paints : ['orange'];
       d.paint = typeof p.paint === 'string' ? p.paint : 'orange';
+      d.fails = (p.fails && typeof p.fails === 'object') ? p.fails : {};
       return d;
     } catch (e) { return clone(DEFAULTS); }
   }
@@ -62,6 +64,9 @@ window.CT = window.CT || {};
     completedCount: function () {
       var n = 0; for (var k in data.levels) if (data.levels[k].completed) n++; return n;
     },
+    getFails: function (id) { return data.fails[id] || 0; },
+    addFail: function (id) { data.fails[id] = (data.fails[id] || 0) + 1; write(); return data.fails[id]; },
+    clearFails: function (id) { if (data.fails[id]) { delete data.fails[id]; write(); } },
     getCoins: function () { return data.coins; },
     addCoins: function (n) { data.coins = Math.max(0, data.coins + Math.floor(n)); write(); return data.coins; },
     spend: function (n) { if (data.coins < n) return false; data.coins -= n; write(); return true; },

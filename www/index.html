@@ -75,7 +75,7 @@
   <!-- ============ HUD ============ -->
   <section id="hud" class="screen hud" hidden aria-label="Game controls">
     <div class="hud-top">
-      <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span></div>
+      <div class="hud-chip level-chip"><span class="lvl-num">1</span><span class="lvl-name">Tutorial</span><span id="easyTag" class="easy-tag" hidden>EASY</span></div>
       <div class="hud-chip cargo-chip" aria-live="polite">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" fill="#d79a5c" stroke="#1d1d22" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 7.5 12 12l9-4.5M12 12v9" fill="none" stroke="#1d1d22" stroke-width="1.6"/></svg>
         <b id="cargoCount">0/3</b>
@@ -99,7 +99,8 @@
       </button>
     </div>
 
-    <div id="banner" class="banner"><div id="bannerTitle" class="banner-title"></div><div id="bannerSub" class="banner-sub"></div></div>
+    <div id="banner" class="banner"><div id="bannerTitle" class="banner-title"></div><div id="bannerSub" class="banner-sub"></div>
+      <div id="bannerProg" class="banner-prog" hidden><div class="bp-track"><i id="bannerBar"></i></div><b id="bannerTime">0:00</b></div></div>
 
     <div class="controls">
       <div class="ctrl-left">
@@ -125,10 +126,14 @@
         <div id="actionHint" class="action-hint"></div>
       </div>
       <div class="ctrl-right">
-        <button id="btnLane" class="round-btn lane-btn" data-tap="lane" type="button" aria-label="Change lane">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3 2 8h3.5v13h3V8H12zm10 18 5-5h-3.5V3h-3v13H12z"/></svg>
-          <span>LANE</span>
-        </button>
+        <div id="laneBtns" class="lane-btns">
+          <button class="round-btn lane-btn" data-tap="laneLeft" type="button" aria-label="Steer left (left lane)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4 7.5 12l8 8 2-2-6-6 6-6z"/></svg><span>LEFT</span>
+          </button>
+          <button class="round-btn lane-btn" data-tap="laneRight" type="button" aria-label="Steer right (right lane)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 4 6.5 6l6 6-6 6 2 2 8-8z"/></svg><span>RIGHT</span>
+          </button>
+        </div>
         <button class="pedal pedal-gas" data-control="gas" type="button" aria-label="Gas">
           <span class="pedal-grip"></span>
           <span class="pedal-label">GAS</span>
@@ -261,7 +266,7 @@
 <script src="js/draw.js"></script>
 <script src="js/truck.js"></script>
 <script src="js/cargo.js"></script>
-<script src="js/crane.js"></script>
+<script src="js/workers.js"></script>
 <script src="js/world.js"></script>
 <script src="js/traffic.js"></script>
 <script src="js/view3d.js"></script>

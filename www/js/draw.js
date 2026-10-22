@@ -60,4 +60,6 @@
   D.easeOutBack = function (t) { var c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 
   CT.Draw = D;
+  /** World speed scale: all speeds/accelerations are multiplied by K so on-screen motion matches the km/h shown. */
+  CT.K = 2.5;
 })(window.CT);
